@@ -1,0 +1,31 @@
+# BUILD OUTPUTS
+bin/
+obj/
+*.dll
+*.pdb
+*.exe
+
+# UNITY / MOD ARTIFACTS
+Library/
+Temp/
+Logs/
+UserSettings/
+
+# VISUAL STUDIO
+.vs/
+*.csproj
+*.sln
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LOCAL DEV
+*.log
+*.cache
+
+# MOD ENV
+BepInEx/
+UnityModManager/

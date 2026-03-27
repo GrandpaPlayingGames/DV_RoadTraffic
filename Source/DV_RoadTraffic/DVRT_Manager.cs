@@ -2,13 +2,13 @@
 using DV.CabControls;
 using DV.Interaction.Inputs;
 using DV.InventorySystem;
+using DV.UI.Inventory;
 using DV.Utils;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
-using DV.UI.Inventory;
-
 
 namespace DV_RoadTraffic
 {
@@ -2037,5 +2037,165 @@ namespace DV_RoadTraffic
             if (panel != null)
                 GameObject.Destroy(panel);
         }
+    }
+}
+
+
+namespace DV_RoadTraffic
+{
+    public class DVRT_FadeUI : MonoBehaviour
+    {
+        public static DVRT_FadeUI Instance;
+
+        private Canvas _canvas;
+        private Image _fadeImage;
+        private Text _fadeText;
+
+        private bool _isBusy = false;
+
+        void Awake()
+        {
+            if (Instance != null)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+
+            CreateUI();
+        }
+
+        private void CreateUI()
+        {
+            GameObject canvasGO = new GameObject("DVRT_FadeCanvas");
+            canvasGO.transform.SetParent(transform, false);
+
+            _canvas = canvasGO.AddComponent<Canvas>();
+            _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            _canvas.sortingOrder = 9999;
+
+            canvasGO.AddComponent<CanvasScaler>().uiScaleMode =
+                CanvasScaler.ScaleMode.ScaleWithScreenSize;
+
+            canvasGO.AddComponent<GraphicRaycaster>();
+
+            // --- Fullscreen black image ---
+            GameObject imageGO = new GameObject("FadeImage");
+            imageGO.transform.SetParent(canvasGO.transform, false);
+
+            _fadeImage = imageGO.AddComponent<Image>();
+            _fadeImage.color = new Color(0f, 0f, 0f, 0f);
+
+            RectTransform rt = imageGO.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            // --- Center text ---
+            GameObject textGO = new GameObject("FadeText");
+            textGO.transform.SetParent(canvasGO.transform, false);
+
+            _fadeText = textGO.AddComponent<Text>();
+            _fadeText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            _fadeText.fontSize = 32;
+            _fadeText.alignment = TextAnchor.MiddleCenter;
+            _fadeText.color = Color.white;
+            _fadeText.text = "";
+
+            RectTransform textRT = textGO.GetComponent<RectTransform>();
+            textRT.anchorMin = Vector2.zero;
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = Vector2.zero;
+            textRT.offsetMax = Vector2.zero;
+
+            _canvas.gameObject.SetActive(false);
+        }
+
+        public void StartTeleport(Vector3 targetPos, string routeName)
+        {
+            if (_isBusy)
+                return;
+
+            StartCoroutine(TeleportRoutine(targetPos, routeName));
+        }
+
+        private IEnumerator TeleportRoutine(Vector3 targetPos, string routeName)
+        {
+            _canvas.gameObject.SetActive(true);
+
+            _isBusy = true;
+
+            _fadeText.text = "Teleporting to " + routeName;
+
+            yield return Fade(1f, 0.35f);
+
+            yield return new WaitForSeconds(0.1f);
+
+            // --- TELEPORT ---
+            PlayerManager.TeleportPlayer(
+                targetPos + Vector3.up * 1.6f,
+                Quaternion.identity,
+                null,
+                true,
+                false
+            );
+
+            // --- WAIT FOR WORLD ---
+            yield return WaitForWorldReady();
+
+            yield return Fade(0f, 0.5f);
+
+            _fadeText.text = "";
+
+            _isBusy = false;
+
+            _canvas.gameObject.SetActive(false);
+        }
+
+        private IEnumerator Fade(float targetAlpha, float duration)
+        {
+            float startAlpha = _fadeImage.color.a;
+            float time = 0f;
+
+            while (time < duration)
+            {
+                time += Time.deltaTime;
+
+                float t = time / duration;
+                float alpha = Mathf.Lerp(startAlpha, targetAlpha, t);
+
+                _fadeImage.color = new Color(0f, 0f, 0f, alpha);
+
+                yield return null;
+            }
+
+            _fadeImage.color = new Color(0f, 0f, 0f, targetAlpha);
+        }
+
+        private IEnumerator WaitForWorldReady()
+        {
+            float timeout = 4f;
+            float t = 0f;
+
+            while (t < timeout)
+            {
+                t += Time.deltaTime;
+
+                Transform cam = Camera.main != null ? Camera.main.transform : null;
+
+                if (cam != null)
+                {
+                    Collider[] hits = Physics.OverlapSphere(cam.position, 5f);
+
+                    if (hits != null && hits.Length > 10)
+                        break;
+                }
+
+                yield return null;
+            }
+        }     
+        
     }
 }

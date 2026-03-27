@@ -136,15 +136,26 @@ namespace DV_RoadTraffic
             Vector3 worldPos =
                 vf.CanonicalPosition + DVRT_WorldShiftManager.CurrentMove;
 
-            PlayerManager.TeleportPlayer(
-                worldPos + Vector3.up * 1.6f,
-                Quaternion.identity,
-                null,
-                true,
-                false
-            );
+            // --- USE FADE SYSTEM ---
+            if (DVRT_FadeUI.Instance != null)
+            {
+                DVRT_FadeUI.Instance.StartTeleport(
+                    worldPos,
+                    vf.RouteName   
+                );
+            }
+            else
+            {               
+                PlayerManager.TeleportPlayer(
+                    worldPos + Vector3.up * 1.6f,
+                    Quaternion.identity,
+                    null,
+                    true,
+                    false
+                );
+            }
 
-            Main.Log($"[DVRT] Teleported to route '{vf.RouteName}'");
+            Main.Log($"[DVRT] Teleporting to route '{vf.RouteName}'");
         }
 
         private void RefreshRoutes()

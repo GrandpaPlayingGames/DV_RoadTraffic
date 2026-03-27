@@ -74,6 +74,10 @@ namespace DV_RoadTraffic {
                 GameObject.DontDestroyOnLoad(warden);
                 warden.AddComponent<TrafficWarden>();
 
+                var fadeUI = new GameObject("DVRT_FadeUI");
+                GameObject.DontDestroyOnLoad(fadeUI);
+                fadeUI.AddComponent<DVRT_FadeUI>();
+
                 Log("Mod loaded successfully.");
                 modEntry.Logger.Log("DVRT Load() reached.");
 

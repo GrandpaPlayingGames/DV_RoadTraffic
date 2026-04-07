@@ -5,6 +5,32 @@ Road traffic system for Derail Valley.
 by GrandpaPlayingGames
 
 
+V1.1.0
+
+## New Features
+
+* Added StopIfTrainAhead option
+* Added IgnoreTrainImpact
+* Added Train Impact Oomph setting
+* Added Engine Volume Control setting
+* Added Horn Volume Control setting 
+* Adjusted defailt train impact explosion
+
+## Installation/Update (NexusMods)
+
+Download from NexusMods and follow instructions there.
+
+*** IMPORTANT ***
+If updating from previous version you MUST FIRST DELETE your existing DV_RoadTraffic folder
+from {Derail Valley}/Mods
+and replace it with the new DV_RoadTraffic folder
+
+DO NOT OVERWRITE ONE FOLDER WITH THE OTHER OR THE UPDATE WILL NOT WORK
+Rewmember, Delete the existiing, THEN add the new.
+
+
+V1.0.0
+
 ## Features
 
 * AI road vehicles

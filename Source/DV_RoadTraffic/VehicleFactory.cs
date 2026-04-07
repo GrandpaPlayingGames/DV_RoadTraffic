@@ -570,8 +570,9 @@ namespace DV_RoadTraffic
                 if (cleanName.Contains("Wreck") ||
                     cleanName.Contains("_dmg") ||
                     cleanName.Contains("Trailer") ||
-                    cleanName.Contains("TruckSemi80s_01_Green") ||
+                    //cleanName.Contains("TruckSemi80s_01_Green") ||
                     cleanName.Contains("Station") ||
+                    cleanName.Contains("TruckMedium90sTrailer_01_Orange") ||
                     cleanName.Contains("MiningTruckWheelOld") ||
                     cleanName.Contains("FarmTractor1")||
                 cleanName.Contains("[interior]")) 

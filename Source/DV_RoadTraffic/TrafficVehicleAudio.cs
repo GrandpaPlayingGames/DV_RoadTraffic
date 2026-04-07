@@ -28,6 +28,12 @@ public class TrafficVehicleAudio : MonoBehaviour
         engineSource.maxDistance = 30f;
         engineSource.minDistance = 3f;
 
+        if (oneshotSource != null)
+            oneshotSource.volume = 1f; // keep neutral
+
+        if (engineSource != null)
+            engineSource.volume = Main.Settings.engineVolume;
+
         engineSource.Play();
     }
 
@@ -45,6 +51,11 @@ public class TrafficVehicleAudio : MonoBehaviour
         float t = Mathf.Clamp01(speed / max);
 
         engineSource.pitch = Mathf.Lerp(basePitch, maxPitch, t);
+
+        if (engineSource != null)
+        {
+            engineSource.volume = Main.Settings.engineVolume;
+        }
     }
 
     public void PlayHorn(AudioClip clip)
@@ -52,12 +63,14 @@ public class TrafficVehicleAudio : MonoBehaviour
         if (clip == null || oneshotSource == null)
             return;
 
-        oneshotSource.PlayOneShot(clip);
+        //oneshotSource.PlayOneShot(clip);
+        oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
     }
 
     public void PlayBrake(AudioClip clip)
     {
-        oneshotSource.PlayOneShot(clip);
+        //oneshotSource.PlayOneShot(clip);
+        oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
     }
 }
 

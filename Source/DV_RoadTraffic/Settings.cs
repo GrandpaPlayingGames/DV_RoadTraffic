@@ -12,6 +12,14 @@ namespace DV_RoadTraffic
 
         public KeyBind ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
         public KeyBind ToggleTrafficWarden = new KeyBind(KeyCode.W, false, true);
+        
+        public bool ignoreTrainImpact = false;
+        public bool stopIfTrainAhead = true;
+
+        public float impactOomph = 1.0f;
+
+        public float engineVolume = 1.0f;
+        public float hornVolume = 1.0f;
 
         public KeyBind RouteInteract = new KeyBind(KeyCode.F9);
 
@@ -40,6 +48,13 @@ namespace DV_RoadTraffic
         {
             ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
             ToggleTrafficWarden = new KeyBind(KeyCode.W, false, true);
+            ignoreTrainImpact = false;
+            stopIfTrainAhead = true;
+
+            engineVolume = 1.0f;
+            hornVolume = 1.0f;
+
+            impactOomph = 1.0f;
 
             RouteInteract = new KeyBind(KeyCode.F9);
 
@@ -86,9 +101,10 @@ namespace DV_RoadTraffic
     {
         private static KeyBind waitingForKey;
 
+        
         public static void Draw(Settings settings)
         {
-
+            
             GUILayout.BeginVertical("box");
 
             GUILayout.Label("Developer Options", UnityModManager.UI.h2);
@@ -105,12 +121,102 @@ namespace DV_RoadTraffic
 
             GUILayout.Space(10);
 
+
             // =========================================================
 
+            /*
             GUILayout.Label("Game Options", GUI.skin.box);
 
             DrawKeyBind("Toggle Edit Mode", settings.ToggleEditMode);
             DrawKeyBind("Toggle Traffic Warden", settings.ToggleTrafficWarden);
+            Main.Settings.ignoreTrainImpact = GUILayout.Toggle(
+                Main.Settings.ignoreTrainImpact,
+                "Ignore Train Collisions"
+            );
+            Main.Settings.stopIfTrainAhead = GUILayout.Toggle(
+                Main.Settings.stopIfTrainAhead,
+                "Stop if Train detected ahead"
+            );
+
+            GUILayout.Label($"Engine Volume: {Main.Settings.engineVolume:F2}");
+            Main.Settings.engineVolume = GUILayout.HorizontalSlider(
+                Main.Settings.engineVolume,
+                0f,
+                1.5f
+            );
+
+            GUILayout.Label($"Horn Volume: {Main.Settings.hornVolume:F2}");
+            Main.Settings.hornVolume = GUILayout.HorizontalSlider(
+                Main.Settings.hornVolume,
+                0f,
+                1.5f
+            );
+            */
+
+            // =========================================================
+
+            GUILayout.Label("Game Options", GUI.skin.box);
+
+            // -------------------------
+            // CONTROLS
+            // -------------------------
+            GUILayout.Label("<b>Controls</b>");
+
+            DrawKeyBind("Toggle Edit Mode", settings.ToggleEditMode);
+            DrawKeyBind("Toggle Traffic Warden", settings.ToggleTrafficWarden);
+
+            // -------------------------
+            // TRAIN INTERACTION
+            // -------------------------
+            GUILayout.Space(6);
+            GUILayout.Box("", GUILayout.ExpandWidth(true), GUILayout.Height(1));
+            GUILayout.Space(4);
+
+            GUILayout.Label("<b>Train Interaction</b>");
+
+            Main.Settings.ignoreTrainImpact = GUILayout.Toggle(
+                Main.Settings.ignoreTrainImpact,
+                "Ignore Train Collisions"
+            );
+
+            Main.Settings.stopIfTrainAhead = GUILayout.Toggle(
+                Main.Settings.stopIfTrainAhead,
+                "Stop if Train Detected Ahead"
+            );
+
+            GUILayout.Label($"Train Impact Oomph: {Main.Settings.impactOomph:F2}");
+
+            Main.Settings.impactOomph = GUILayout.HorizontalSlider(
+                Main.Settings.impactOomph,
+                0.5f,   // minimum
+                3.0f    // maximum
+            );
+
+            // -------------------------
+            // AUDIO
+            // -------------------------
+            GUILayout.Space(6);
+            GUILayout.Box("", GUILayout.ExpandWidth(true), GUILayout.Height(1));
+            GUILayout.Space(4);
+
+            GUILayout.Label("<b>Audio</b>");
+
+            // Engine Volume
+            GUILayout.Label($"Engine Volume: {(Main.Settings.engineVolume * 100f):F0}%");
+            Main.Settings.engineVolume = GUILayout.HorizontalSlider(
+                Main.Settings.engineVolume,
+                0f,
+                1.5f
+            );
+
+            // Horn Volume
+            GUILayout.Label($"Horn Volume: {(Main.Settings.hornVolume * 100f):F0}%");
+            Main.Settings.hornVolume = GUILayout.HorizontalSlider(
+                Main.Settings.hornVolume,
+                0f,
+                1.5f
+            );
+            
 
             GUILayout.Space(10);
 
@@ -176,6 +282,7 @@ namespace DV_RoadTraffic
                 Main.Settings.Save(Main.Mod);
             }
         }
+        
 
         private static void DrawKeyBind(string label, KeyBind bind)
         {

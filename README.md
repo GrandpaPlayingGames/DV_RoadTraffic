@@ -26,7 +26,7 @@ from {Derail Valley}/Mods
 and replace it with the new DV_RoadTraffic folder
 
 DO NOT OVERWRITE ONE FOLDER WITH THE OTHER OR THE UPDATE WILL NOT WORK
-Rewmember, Delete the existiing, THEN add the new.
+Remember, Delete the existing, THEN add the new.
 
 
 V1.0.0

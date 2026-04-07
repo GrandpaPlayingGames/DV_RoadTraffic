@@ -44,6 +44,7 @@ V1.0.0
 
 Download from NexusMods and follow instructions there.
 
+https://www.nexusmods.com/derailvalley/mods/1461
 
 
 ## Source Code
@@ -52,7 +53,7 @@ This repository contains the full source code of the mod.
 
 
 
-\## Development Setup
+## Development Setup
 
 
 
@@ -64,7 +65,7 @@ To build this mod, create a Class Library project and add references to the foll
 
 
 
-\### Notes
+### Notes
 
 
 
@@ -76,18 +77,17 @@ To build this mod, create a Class Library project and add references to the foll
 
 
 
-\## Required References
+## Required References
 
 
 
-\### Derail Valley (Game)
+### Derail Valley (Game)
 
 
 
 Located in:
 
 DerailValley\_Data/Managed/
-
 
 
 \- Assembly-CSharp.dll
@@ -108,14 +108,13 @@ DerailValley\_Data/Managed/
 
 
 
-\### Unity Engine
+### Unity Engine
 
 
 
 Also in:
 
 DerailValley\_Data/Managed/
-
 
 
 \- UnityEngine.dll
@@ -148,8 +147,7 @@ DerailValley\_Data/Managed/
 
 
 
-\### Modding Libraries
-
+### Modding Libraries
 
 
 \- 0Harmony.dll
@@ -159,12 +157,10 @@ DerailValley\_Data/Managed/
 \- Newtonsoft.Json.dll
 
 
-\## Support Development
-
+## Support Development
 
 
 Enjoying the mod? You can support continued development:
-
 
 
 ☕ Buy me a coffee: https://buymeacoffee.com/grandpaplayinggames

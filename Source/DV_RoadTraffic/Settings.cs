@@ -9,6 +9,7 @@ namespace DV_RoadTraffic
     {
         public bool enabled = true;
         public bool debugLogging = false;
+        public int vehicleLayer = 27;
 
         public KeyBind ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
         public KeyBind ToggleTrafficWarden = new KeyBind(KeyCode.W, false, true);
@@ -104,55 +105,7 @@ namespace DV_RoadTraffic
         
         public static void Draw(Settings settings)
         {
-            
-            GUILayout.BeginVertical("box");
-
-            GUILayout.Label("Developer Options", UnityModManager.UI.h2);
-
-            bool newDebug = GUILayout.Toggle(settings.debugLogging, "Enable Debug Logging");
-
-            if (newDebug != settings.debugLogging)
-            {
-                settings.debugLogging = newDebug;
-                Main.Log($"[DVRT] Debug logging {(settings.debugLogging ? "ENABLED" : "DISABLED")}", true);
-            }
-
-            GUILayout.EndVertical();
-
-            GUILayout.Space(10);
-
-
-            // =========================================================
-
-            /*
-            GUILayout.Label("Game Options", GUI.skin.box);
-
-            DrawKeyBind("Toggle Edit Mode", settings.ToggleEditMode);
-            DrawKeyBind("Toggle Traffic Warden", settings.ToggleTrafficWarden);
-            Main.Settings.ignoreTrainImpact = GUILayout.Toggle(
-                Main.Settings.ignoreTrainImpact,
-                "Ignore Train Collisions"
-            );
-            Main.Settings.stopIfTrainAhead = GUILayout.Toggle(
-                Main.Settings.stopIfTrainAhead,
-                "Stop if Train detected ahead"
-            );
-
-            GUILayout.Label($"Engine Volume: {Main.Settings.engineVolume:F2}");
-            Main.Settings.engineVolume = GUILayout.HorizontalSlider(
-                Main.Settings.engineVolume,
-                0f,
-                1.5f
-            );
-
-            GUILayout.Label($"Horn Volume: {Main.Settings.hornVolume:F2}");
-            Main.Settings.hornVolume = GUILayout.HorizontalSlider(
-                Main.Settings.hornVolume,
-                0f,
-                1.5f
-            );
-            */
-
+                      
             // =========================================================
 
             GUILayout.Label("Game Options", GUI.skin.box);
@@ -217,7 +170,6 @@ namespace DV_RoadTraffic
                 1.5f
             );
             
-
             GUILayout.Space(10);
 
             GUILayout.Label("Main Edit Options", GUI.skin.box);
@@ -274,6 +226,42 @@ namespace DV_RoadTraffic
 
             DrawKeyBind("Toggle Gun Types", settings.ToggleGunType);
 
+            
+
+            GUILayout.Space(20);
+
+            GUILayout.BeginVertical("box");
+
+
+            GUILayout.Label("Developer Options", UnityModManager.UI.h2);
+
+            /*
+            bool newDebug = GUILayout.Toggle(settings.debugLogging, "Enable Debug Logging");
+
+            if (newDebug != settings.debugLogging)
+            {
+                settings.debugLogging = newDebug;
+                Main.Log($"[DVRT] Debug logging {(settings.debugLogging ? "ENABLED" : "DISABLED")}", true);
+            }
+
+            */
+
+            GUILayout.Label($"Vehicle Layer: {Main.Settings.vehicleLayer}");
+
+            int newLayer = Mathf.RoundToInt(GUILayout.HorizontalSlider(
+                Main.Settings.vehicleLayer,
+                0,
+                27
+            ));
+
+            if (newLayer != Main.Settings.vehicleLayer)
+            {
+                Main.Settings.vehicleLayer = newLayer;
+                DVRT_Manager.ApplyVehicleLayerChange(newLayer);
+            }
+
+            GUILayout.EndVertical();            
+
             GUILayout.Space(20);
 
             if (GUILayout.Button("Reset To Defaults", GUILayout.Height(30)))
@@ -281,9 +269,10 @@ namespace DV_RoadTraffic
                 settings.ResetToDefaults();
                 Main.Settings.Save(Main.Mod);
             }
+
+
         }
         
-
         private static void DrawKeyBind(string label, KeyBind bind)
         {
             GUILayout.BeginHorizontal();
@@ -386,8 +375,7 @@ namespace DV_RoadTraffic
             bool shiftHeld =
                 Input.GetKey(KeyCode.LeftShift) ||
                 Input.GetKey(KeyCode.RightShift);
-
-            // exact modifier match (same logic as IsPressed)
+           
             if (ctrlHeld != Ctrl)
                 return false;
 

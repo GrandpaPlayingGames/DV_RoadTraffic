@@ -221,6 +221,36 @@ namespace DV_RoadTraffic
             DrawRoutePreview();
         }
 
+        public static void ApplyVehicleLayerChange(int newLayer)
+        {
+            Main.Log($"[DVRT] Applying vehicle layer: {newLayer}");
+            
+            for (int i = 0; i < 32; i++)
+            {
+                Physics.IgnoreLayerCollision(newLayer, i, false);
+                Physics.IgnoreLayerCollision(i, newLayer, false);
+            }
+            
+            Physics.IgnoreLayerCollision(newLayer, newLayer, true);
+
+            foreach (var vehicle in ActiveVehicles)
+            {
+                if (vehicle != null)
+                    SetLayerRecursive(vehicle.gameObject, newLayer);
+            }
+        }
+
+        private static void SetLayerRecursive(GameObject obj, int layer)
+        {
+            obj.layer = layer;
+
+            foreach (Transform child in obj.transform)
+            {
+                if (child != null)
+                    SetLayerRecursive(child.gameObject, layer);
+            }
+        }
+
         public static void _______________INPUTS_________________()
         {
         }
@@ -857,8 +887,19 @@ namespace DV_RoadTraffic
             clone.name = archetype.name + "_TrafficClone";
             clone.transform.SetParent(null, true);
             clone.transform.localScale = Vector3.one;
+            
+            // REMOVE TRAILER HERE
+            for (int i = clone.transform.childCount - 1; i >= 0; i--)
+            {
+                Transform child = clone.transform.GetChild(i);
 
-            SetLayerRecursively(clone, 27);
+                if (child.name.Contains("Trailer"))
+                {
+                    child.gameObject.SetActive(false);
+                }
+            }
+            
+            SetLayerRecursive(clone, Main.Settings.vehicleLayer);
             Physics.IgnoreLayerCollision(27, 27, true);
 
             var controller = clone.AddComponent<TrafficVehicleController>();

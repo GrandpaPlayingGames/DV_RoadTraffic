@@ -395,8 +395,7 @@ namespace DV_RoadTraffic
                     pendingTurnTarget = activeTurnTarget;
 
                     Main.Log(
-                        $"[DVRT] SAFETY TURN ACTIVATED | {gameObject.name} ({GetInstanceID()})",
-                        true);
+                        $"[DVRT] SAFETY TURN ACTIVATED | {gameObject.name} ({GetInstanceID()})");
                 }
             }
 
@@ -645,13 +644,7 @@ namespace DV_RoadTraffic
                 if (distSq < closestDistSq)
                 {
                     closestDistSq = distSq;
-                    vehicleAhead = other;
-                    /*
-                    // super spammy
-                    Main.Log(
-    $"[DVRT] VEHICLE AHEAD DETECTED | {cleanName} -> {other.cleanName} | dist={Mathf.Sqrt(distSq):F2}",
-    true);
-                    */
+                    vehicleAhead = other;                    
                 }
             }
         }
@@ -669,12 +662,12 @@ namespace DV_RoadTraffic
             Vector3 origin = transform.position + Vector3.up * 0.5f;
             Vector3 direction = transform.forward;
 
-            float detectDistance = trafficDetectDistance; // reuse your existing distance
-            float laneWidth = 2.5f; // tweak if needed
+            float detectDistance = trafficDetectDistance; 
+            float laneWidth = 2.5f; 
 
             RaycastHit[] hits = Physics.SphereCastAll(
                 origin,
-                1.2f, // sphere radius (tweakable)
+                1.2f, // 
                 direction,
                 detectDistance
             );
@@ -699,7 +692,6 @@ namespace DV_RoadTraffic
 
                 Vector3 toHit = hit.point - transform.position;
 
-                // 🔵 Forward cone check
                 float forwardDot = Vector3.Dot(transform.forward, toHit.normalized);
                 if (forwardDot < 0.5f)
                     continue;
@@ -708,7 +700,6 @@ namespace DV_RoadTraffic
                 if (distSq > detectDistance * detectDistance)
                     continue;
 
-                // 🔵 Convert to local space for lane check
                 Vector3 local = transform.InverseTransformPoint(hit.point);
 
                 bool isInLane = Mathf.Abs(local.x) < laneWidth;
@@ -723,10 +714,7 @@ namespace DV_RoadTraffic
 
             if (closestTrain == null)
                 return;
-
-
-
-            // 🛑 HARD STOP if blocking lane
+            
             if (closestInLane)
             {
                 trainAhead = closestTrain;
@@ -738,279 +726,12 @@ namespace DV_RoadTraffic
             {
                 float dist = Mathf.Sqrt(closestDistSq);
 
-                if (dist < 25f) // caution distance (tweak)
+                if (dist < 25f) 
                 {
                     cautiousForTrain = true;
                 }
             }
         }
-
-        /*
-        void DetectTrainTooClose()
-        {
-            Main.Log($"[DVRT] ignoreTrainImpact = {Main.Settings.ignoreTrainImpact}");
-
-            if (!Main.Settings.ignoreTrainImpact)
-                return;
-
-            if (isGhosted)
-                return;
-
-            Vector3 origin = transform.position + Vector3.up * 0.5f;
-            Vector3 direction = transform.forward;
-
-            float detectDistance = 1.5f;   // 🔥 very short
-            float radius = 1.5f;           // 🔥 wider than normal
-
-            RaycastHit[] hits = Physics.SphereCastAll(
-                origin,
-                radius,
-                direction,
-                detectDistance
-            );
-
-            if (hits == null || hits.Length == 0)
-                return;
-
-            foreach (var hit in hits)
-            {
-                if (hit.collider == null)
-                    continue;
-
-                TrainCar tc = hit.collider.GetComponentInParent<TrainCar>();
-                if (tc == null)
-                    continue;
-
-                Main.Log($"[DVRT] TRAIN TOO CLOSE (SPHERECAST) → GHOSTING {gameObject.name}");
-
-                EnableGhostMode(tc);
-                return;
-            }
-        }
-        */
-
-
-        /*
-        void DetectTrainTooClose()
-        {
-            if (!Main.Settings.ignoreTrainImpact)
-                return;
-
-            if (isGhosted)
-                return;
-
-            Vector3 origin = transform.position + Vector3.up * 0.5f;
-            Vector3 direction = transform.forward;
-
-            float detectDistance = trafficDetectDistance; // 🔥 EXACT SAME
-            float laneWidth = 2.5f;
-
-            RaycastHit[] hits = Physics.SphereCastAll(
-                origin,
-                1.2f,
-                direction,
-                detectDistance
-            );
-
-            if (hits == null || hits.Length == 0)
-                return;
-
-            float closestDistSq = float.MaxValue;
-            TrainCar closestTrain = null;
-            bool closestInLane = false;
-
-            foreach (var hit in hits)
-            {
-                if (hit.collider == null)
-                    continue;
-
-                TrainCar tc = hit.collider.GetComponentInParent<TrainCar>();
-                if (tc == null)
-                    continue;
-
-                //Vector3 toHit = hit.point - transform.position;
-                //Vector3 front = transform.position + transform.forward * 1.5f; // tweakable offset
-                float forwardOffset = Mathf.Clamp(GetComponent<Collider>().bounds.extents.z, 1f, 4f);
-                Vector3 front = transform.position + transform.forward * forwardOffset;
-                //Vector3 toHit = hit.point - front;
-
-                float forwardDot = Vector3.Dot(transform.forward, toHit.normalized);
-                if (forwardDot < 0.5f)
-                    continue;
-
-                float distSq = toHit.sqrMagnitude;
-                if (distSq > detectDistance * detectDistance)
-                    continue;
-
-                Vector3 local = transform.InverseTransformPoint(hit.point);
-                bool isInLane = Mathf.Abs(local.x) < laneWidth;
-
-                if (distSq < closestDistSq)
-                {
-                    closestDistSq = distSq;
-                    closestTrain = tc;
-                    closestInLane = isInLane;
-                }
-            }
-
-            //if (closestTrain == null)
-            //    return;
-     
-
-            // 🔥 reject train if it's behind us
-            if (closestTrain != null)
-            {
-                Vector3 toTrain = closestTrain.transform.position - transform.position;
-                float forwardDot = Vector3.Dot(transform.forward, toTrain.normalized);
-
-                if (forwardDot < 0.0f) // behind
-                {
-                    closestTrain = null;
-                    closestInLane = false;
-                }
-            }
-
-
-            float ghostEnterDistance = 20.0f;
-            float ghostExitDistance = 25.0f;
-
-            // Default values
-            bool trainDetected = (closestTrain != null);
-            float dist = trainDetected ? Mathf.Sqrt(closestDistSq) : float.MaxValue;
-
-            // 🔴 ENTER ghost
-            if (trainDetected && closestInLane && !isGhosted && dist < ghostEnterDistance)
-            {
-                Main.Log($"[DVRT] ENTER GHOST | dist={dist:F2}");
-                EnableGhostMode(closestTrain);
-            }
-
-            // 🟢 EXIT ghost
-            if (isGhosted)
-            {
-                // Exit if:
-                // 1) no train detected anymore
-                // OR
-                // 2) train is far enough away
-                if (!trainDetected || dist > ghostExitDistance)
-                {
-                    Main.Log($"[DVRT] EXIT GHOST | dist={(trainDetected ? dist.ToString("F2") : "NO TRAIN")}");
-                    DisableGhostMode();
-                }
-            }
-        }
-
-        */
-
-        /*
-        void DetectTrainTooClose()
-        {
-            if (!Main.Settings.ignoreTrainImpact)
-                return;
-
-            Vector3 origin = transform.position + Vector3.up * 0.5f;
-            Vector3 direction = transform.forward;
-
-            float detectDistance = trafficDetectDistance; // same long-range detection as DetectTrainAhead
-            float laneWidth = 2.5f;
-
-            // Tune these
-            //float ghostEnterDistance = 20.0f;
-            //float ghostExitDistance = 25.0f;
-
-            RaycastHit[] hits = Physics.SphereCastAll(
-                origin,
-                1.2f,
-                direction,
-                detectDistance
-            );
-
-            float closestForwardDist = float.MaxValue;
-            TrainCar closestTrain = null;
-            bool closestInLane = false;
-
-            // Use the FRONT of the vehicle, not the center
-            //float forwardOffset = vehicleLength * 0.5f;
-            Collider col = GetComponent<Collider>();
-            float forwardOffset = col.bounds.extents.z;
-            Vector3 front = transform.position + transform.forward * forwardOffset;
-            Vector3 back = transform.position - transform.forward * forwardOffset;
-
-            
-
-            foreach (var hit in hits)
-            {
-                if (hit.collider == null)
-                    continue;
-
-                TrainCar tc = hit.collider.GetComponentInParent<TrainCar>();
-                if (tc == null)
-                    continue;
-
-                // -------------------------
-                // FRONT-BUMPER DISTANCE
-                // -------------------------
-                Vector3 toHit = hit.point - front;
-
-                float forwardDist = Vector3.Dot(transform.forward, toHit);
-
-                if (forwardDist < 0f)
-                    continue; // train is behind or already passed
-
-                // -------------------------
-                // LANE CHECK (use hit point)
-                // -------------------------
-                Vector3 localToHit = transform.InverseTransformPoint(hit.point);
-                bool isInLane = Mathf.Abs(localToHit.x) < laneWidth;
-
-                // -------------------------
-                // CLOSEST TRAIN TRACKING
-                // -------------------------
-                if (forwardDist < closestForwardDist)
-                {
-                    closestForwardDist = forwardDist;
-                    closestTrain = tc;
-                    closestInLane = isInLane;
-                }
-            }
-
-            if (closestTrain != null)
-            {
-                Main.Log($"[DVRT] frontDist={closestForwardDist:F2} | {gameObject.name}");
-            }
-
-            // -------------------------
-            // SIMPLE TIMER-BASED GHOST
-            // -------------------------
-
-            float ghostEnterDistance = 4.0f; // we’ll tune this later
-
-            // ENTER
-            if (!isGhosted)
-            {
-                if (closestTrain != null && closestInLane && closestForwardDist < ghostEnterDistance)
-                {
-                    Main.Log($"[DVRT] ENTER GHOST | dist={closestForwardDist:F2} | {gameObject.name}");
-
-                    EnableGhostMode(closestTrain);
-
-                    ghostEndTime = Time.time + 4.0f; // 🔥 simple, stable
-                }
-
-                return;
-            }
-
-            // EXIT (timer only)
-            if (Time.time >= ghostEndTime)
-            {
-                Main.Log($"[DVRT] EXIT GHOST (timer) | {gameObject.name}");
-
-                DisableGhostMode();
-            }
-
-
-        }
-        */
 
         void DetectTrainTooClose()
         {
@@ -1046,9 +767,6 @@ namespace DV_RoadTraffic
             Vector3 front = transform.position + transform.forward * halfLength;
             Vector3 back = transform.position - transform.forward * halfLength;
 
-            // -------------------------
-            // DETECTION LOOP (CLEAN)
-            // -------------------------
             foreach (var hit in hits)
             {
                 if (hit.collider == null)
@@ -1077,14 +795,14 @@ namespace DV_RoadTraffic
                 }
             }
 
-            // Debug (safe to remove later)
+            // Debug
             if (closestTrain != null)
             {
                 Main.Log($"[DVRT] frontDist={closestForwardDist:F2} | {gameObject.name}");
             }
 
             // -------------------------
-            // GHOST LOGIC (SIMPLE + STABLE)
+            // GHOST LOGIC
             // -------------------------
             float ghostEnterDistance = 3.0f;
 
@@ -1097,9 +815,7 @@ namespace DV_RoadTraffic
 
                     EnableGhostMode(closestTrain);
 
-                    //ghostEndTime = Time.time + 5.0f;
-
-                    float baseTime = 3.0f; // your current "car" timing baseline
+                    float baseTime = 3.0f; // baseline
 
                     float vehicleLength = halfLength * 2f;
 
@@ -1126,16 +842,30 @@ namespace DV_RoadTraffic
 
         void DetectTrainContact()
         {
-            // 🔒 Gate 1: feature toggle
             if (!Main.Settings.ignoreTrainImpact)
                 return;
 
-            // 🔒 Gate 2: already ghosted (no need to re-trigger)
-            if (isGhosted)
+            Collider col = GetComponent<Collider>();
+            if (col == null)
                 return;
 
-            // Small radius around vehicle
-            Collider[] overlaps = Physics.OverlapSphere(transform.position, 1.5f);
+            BoxCollider box = col as BoxCollider;
+            if (box == null)
+                return;
+
+            Vector3 worldCenter = transform.TransformPoint(box.center);
+            Vector3 halfExtents = Vector3.Scale(box.size * 0.5f, transform.lossyScale);
+
+            float padding = 0.25f;
+
+            Collider[] overlaps = Physics.OverlapBox(
+                worldCenter,
+                halfExtents + Vector3.one * padding,
+                transform.rotation
+            );
+
+            bool trainNearby = false;
+            TrainCar detectedTrain = null;
 
             foreach (var c in overlaps)
             {
@@ -1146,15 +876,37 @@ namespace DV_RoadTraffic
                 if (tc == null)
                     continue;
 
-                Main.Log($"[DVRT] CONTACT DETECTED → FORCE GHOST | {gameObject.name}");
+                trainNearby = true;
+                detectedTrain = tc;
+                break;
+            }
 
-                EnableGhostMode(tc);
-                ghostEndTime = Time.time + 6.0f;
+            // -------------------------
+            // STILL NEAR TRAIN → EXTEND GHOST
+            // -------------------------
+            if (trainNearby)
+            {
+                if (!isGhosted)
+                {
+                    Main.Log($"[DVRT] CONTACT → ENTER GHOST | {gameObject.name}");
+                    EnableGhostMode(detectedTrain);
+                }
+
+                // 🔑 Keep extending while dangerous
+                ghostEndTime = Time.time + 2.0f;
 
                 return;
             }
-        }
 
+            // -------------------------
+            // CLEAR → EXIT WHEN TIMER EXPIRES
+            // -------------------------
+            if (isGhosted && Time.time >= ghostEndTime)
+            {
+                Main.Log($"[DVRT] CLEAR → EXIT GHOST | {gameObject.name}");
+                DisableGhostMode();
+            }
+        }
 
         void DetectDeadlock()
         {
@@ -1301,42 +1053,7 @@ namespace DV_RoadTraffic
         }
         
         private bool gtaImpactHandled = false;
-        /*
-        private void OnCollisionStay(Collision collision)
-        {
-            if (gtaImpactHandled)
-                return;
-
-            var train = collision.collider.GetComponentInParent<TrainCar>();
-
-            if (train == null)
-                return;
-
-            gtaImpactHandled = true;
-
-            Main.Log($"**************** [DVRT_Collision] ON COLLISION STAY  Physical Collision encountered by {gameObject.name}");
-    
-            GTAImpactHandler.HandleTrainImpact(this, collision);
-        }
-        */
-
-        /*
-        private void OnCollisionEnter(Collision collision)
-        {
-            var train = collision.collider.GetComponentInParent<TrainCar>();
-
-            if (train == null)
-                return;
-
-            if (train != null)
-            {
-                Main.Log($"**************** [DVRT_Collision] ON COLLISION ENTER Physical Collision encountered by {gameObject.name}");
-                
-                GTAImpactHandler.HandleTrainImpact(this, collision);
-            }
-        }
-        */
-
+  
         private void OnCollisionEnter(Collision collision)
         {
             if (gtaImpactHandled)
@@ -1542,6 +1259,7 @@ namespace DV_RoadTraffic
 
             if (marker.Type == TrafficMarker.MarkerType.Despawn)
             {
+                Main.Log($"Destroying {gameObject.name} after Despawn marker hit");
                 Destroy(gameObject);
                 return;
             }
@@ -1580,7 +1298,6 @@ namespace DV_RoadTraffic
 
                 TrafficVehicleAudio.PlayHorn(horn);
 
-                // cooldown so vehicles don't spam horns
                 nextHornTime = Time.time + UnityEngine.Random.Range(5f, 15f);
             }
         }                
@@ -1590,108 +1307,6 @@ namespace DV_RoadTraffic
         }
 
         public bool destroyed = false;
-
-        /*
-        private void DetectTrainImpact()
-        {
-            if (Main.Settings.ignoreTrainImpact)
-            {
-                return;
-            }
-
-            if (Time.time < impactCooldown)
-                return;
-
-            Rigidbody rb = GetComponent<Rigidbody>();
-            if (rb == null)
-                return;
-
-            if (Main.Settings.ignoreTrainImpact)
-            {
-                Rigidbody rb = vehicle.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.velocity = transform.forward * currentSpeed;
-                    rb.angularVelocity = Vector3.zero;
-                }
-
-                return;
-            }
-
-            float velocityChange = (rb.velocity - lastVelocity).magnitude;
-
-            lastVelocity = rb.velocity;
-
-            // Ignore tiny bumps
-            if (velocityChange < 3f)
-                return;
-
-            // Check if a train is nearby
-            Collider[] hits = Physics.OverlapSphere(transform.position, 3f);
-
-            foreach (var col in hits)
-            {
-                if (col.GetComponentInParent<TrainCar>() != null)
-                {
-                    Main.Log($"[DVRT GTA] Impact detected on {gameObject.name} | Δv = {velocityChange:F2}");
-
-                    impactCooldown = Time.time + 1f;
-                    GTAImpactHandler.HandleTrainImpact(this, null);
-                    return;
-                }
-            }
-        }
-        */
-
-        /*
-        private void DetectTrainImpact()
-        {
-            // 🔥 HARD DISABLE in ghost mode
-            if (Main.Settings.ignoreTrainImpact)
-                return;
-
-            if (Time.time < impactCooldown)
-                return;
-
-            Rigidbody rb = GetComponent<Rigidbody>();
-            if (rb == null)
-                return;
-
-            //float velocityChange = (rb.velocity - lastVelocity).magnitude;
-            //lastVelocity = rb.velocity;
-
-            //if (velocityChange < 3f)
-            //    return;
-            Vector3 deltaVelocity = rb.velocity - lastVelocity;
-            lastVelocity = rb.velocity;
-
-            float velocityChange = deltaVelocity.magnitude;
-
-            // 🔥 NEW: detect sideways acceleration
-            float sidewaysChange = Vector3.Dot(deltaVelocity, transform.right);
-            float sidewaysAbs = Mathf.Abs(sidewaysChange);
-
-            // 🔥 Trigger if EITHER condition met
-            if (velocityChange < 3f && sidewaysAbs < 1.5f)
-                return;
-
-            Collider[] hits = Physics.OverlapSphere(transform.position, 3f);
-
-            foreach (var col in hits)
-            {
-                if (col.GetComponentInParent<TrainCar>() != null)
-                {
-                    Main.Log($"[DVRT GTA] Impact detected on {gameObject.name}");
-
-                    impactCooldown = Time.time + 1f;
-
-                    GTAImpactHandler.HandleTrainImpact(this, null);
-                    return;
-                }
-            }
-        }
-        */
-
         private void DetectTrainImpact()
         {
             if (Main.Settings.ignoreTrainImpact)
@@ -1710,11 +1325,9 @@ namespace DV_RoadTraffic
             {
                 if (col == null)
                     continue;
-
-                // 🔥 Try direct
+                
                 TrainCar tc = col.GetComponentInParent<TrainCar>();
-
-                // 🔥 Fallback: detect via name/layer/tag
+               
                 if (tc == null)
                 {
                     string name = col.name.ToLower();
@@ -1735,10 +1348,6 @@ namespace DV_RoadTraffic
 
                 impactCooldown = Time.time + 1f;
 
-
-
-                //GTAImpactHandler.HandleTrainImpact(this, null);
-
                 tc = col.GetComponentInParent<TrainCar>();
 
                 if (tc != null)
@@ -1749,7 +1358,104 @@ namespace DV_RoadTraffic
             }
         }
 
+        bool ghostDebug = true;
 
+        // Cache original colors per renderer/material index
+        private Dictionary<Renderer, Color[]> originalColors = new Dictionary<Renderer, Color[]>();
+
+        private int ghostEnterCount = 0;
+
+        private Color[] ghostDebugColors = new Color[]
+        {
+            Color.red,
+            Color.blue,
+            Color.green,
+            Color.cyan
+        };
+
+        /*
+        void EnableGhostMode(TrainCar tc)
+        {
+            if (isGhosted)
+                return;
+
+            isGhosted = true;
+
+            // Cache renderers once if needed
+            if (ghostRenderers.Count == 0)
+                ghostRenderers = GetComponentsInChildren<Renderer>(true).ToList();
+
+            // -------------------------
+            // VISUAL HANDLING
+            // -------------------------
+            if (!ghostDebug)
+            {
+                // Disable rendering (original behavior)
+                foreach (var r in ghostRenderers)
+                {
+                    if (r != null)
+                        r.enabled = false;
+                }
+            }
+            else
+            {
+                // Increment entry count
+                ghostEnterCount++;
+
+                int colorIndex = Mathf.Clamp(ghostEnterCount - 1, 0, ghostDebugColors.Length - 1);
+                Color debugColor = ghostDebugColors[colorIndex];
+
+                Main.Log($"[DVRT] GHOST DEBUG COLOR = {debugColor} | entry #{ghostEnterCount}");
+
+                foreach (var r in ghostRenderers)
+                {
+                    if (r == null)
+                        continue;
+
+                    var mats = r.materials;
+
+                    if (!originalColors.ContainsKey(r))
+                    {
+                        Color[] cols = new Color[mats.Length];
+
+                        for (int i = 0; i < mats.Length; i++)
+                        {
+                            if (mats[i].HasProperty("_Color"))
+                                cols[i] = mats[i].color;
+                            else
+                                cols[i] = Color.white;
+                        }
+
+                        originalColors[r] = cols;
+                    }
+
+                    for (int i = 0; i < mats.Length; i++)
+                    {
+                        if (mats[i].HasProperty("_Color"))
+                            mats[i].color = debugColor;
+                        else if (mats[i].HasProperty("_BaseColor"))
+                            mats[i].SetColor("_BaseColor", debugColor);
+                    }
+                }
+            }
+
+            // -------------------------
+            // COLLISION / PHYSICS 
+            // -------------------------
+ 
+            Rigidbody rb = GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = true;
+                rb.detectCollisions = false;
+
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
+            Main.Log("[DVRT] GHOST ENABLED");
+        }
+        */
 
         void EnableGhostMode(TrainCar tc)
         {
@@ -1762,28 +1468,30 @@ namespace DV_RoadTraffic
             if (ghostRenderers.Count == 0)
                 ghostRenderers = GetComponentsInChildren<Renderer>(true).ToList();
 
-            // Disable rendering (visual debug)
+            // -------------------------
+            // VISUAL HANDLING (always hide)
+            // -------------------------
             foreach (var r in ghostRenderers)
             {
                 if (r != null)
                     r.enabled = false;
             }
 
-            // Disable collisions
-            foreach (var col in GetComponentsInChildren<Collider>(true))
-            {
-                if (col != null)
-                    col.enabled = false;
-            }
-
-            // Disable physics
+            // -------------------------
+            // COLLISION / PHYSICS
+            // -------------------------
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb != null)
+            {
                 rb.isKinematic = true;
+                rb.detectCollisions = false;
+
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
 
             Main.Log("[DVRT] GHOST ENABLED");
         }
-
 
         /*
         void DisableGhostMode()
@@ -1791,30 +1499,66 @@ namespace DV_RoadTraffic
             if (!isGhosted)
                 return;
 
-            isGhosted = false;
+            isGhosted = false;           
 
-            // Restore rendering
-            foreach (var r in ghostRenderers)
+            // -------------------------
+            // VISUAL RESTORE
+            // -------------------------
+            if (!ghostDebug)
             {
-                if (r != null)
-                    r.enabled = true;
+                // Original behavior
+                foreach (var r in ghostRenderers)
+                {
+                    if (r != null)
+                        r.enabled = true;
+                }
+            }
+            else
+            {
+                // Restore original colors
+                foreach (var r in ghostRenderers)
+                {
+                    if (r == null)
+                        continue;
+
+                    if (!originalColors.ContainsKey(r))
+                        continue;
+
+                    var mats = r.materials;
+                    var cols = originalColors[r];
+
+                    for (int i = 0; i < mats.Length && i < cols.Length; i++)
+                    {
+                        if (mats[i].HasProperty("_Color"))
+                            mats[i].color = cols[i];
+                    }
+                }
             }
 
-            // Restore collisions
-            foreach (var col in GetComponentsInChildren<Collider>(true))
+            // -------------------------
+            // COLLISION / PHYSICS
+            // -------------------------
+            
+            RaycastHit hit;
+
+            if (Physics.Raycast(transform.position, Vector3.down, out hit, 0.2f))
             {
-                if (col != null)
-                    col.enabled = true;
+                // already close to ground, no correction needed
+            }
+            else
+            {
+                transform.position += Vector3.up * 0.05f;
             }
 
-            transform.position += Vector3.up * 0.1f;
-
-            // Restore physics
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb != null)
-                rb.isKinematic = false;
+            {
+                rb.detectCollisions = true;
+            }
 
-            Main.Log("[DVRT] GHOST DISABLED");
+            StartCoroutine(RestorePhysicsAfterSettle());
+
+            Main.Log("[DVRT] GHOST DISABLED (deferred physics)");
         }
         */
 
@@ -1825,24 +1569,37 @@ namespace DV_RoadTraffic
 
             isGhosted = false;
 
-            // Restore rendering immediately
+            // -------------------------
+            // VISUAL RESTORE (always)
+            // -------------------------
             foreach (var r in ghostRenderers)
             {
                 if (r != null)
                     r.enabled = true;
             }
 
-            // Restore collisions immediately
-            foreach (var col in GetComponentsInChildren<Collider>(true))
+            // -------------------------
+            // SMALL POSITION CORRECTION
+            // -------------------------
+            RaycastHit hit;
+
+            if (!Physics.Raycast(transform.position, Vector3.down, out hit, 0.2f))
             {
-                if (col != null)
-                    col.enabled = true;
+                transform.position += Vector3.up * 0.05f;
             }
 
-            // Small lift to avoid ground penetration
-            transform.position += Vector3.up * 0.1f;
+            // 🔑 Ensure physics sees new position immediately
+            Physics.SyncTransforms();
 
-            // 🔥 DEFER physics restore
+            // -------------------------
+            // COLLISION / PHYSICS
+            // -------------------------
+            Rigidbody rb = GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.detectCollisions = true;
+            }
+
             StartCoroutine(RestorePhysicsAfterSettle());
 
             Main.Log("[DVRT] GHOST DISABLED (deferred physics)");
@@ -2042,6 +1799,13 @@ namespace DV_RoadTraffic
 
         private void CheckIfStuck()
         {
+            if (isGhosted)
+            {
+                stuckTime = 0f;
+                lastPosition = transform.position;
+                return;
+            }
+
             if (Time.time - spawnTime < 2f)
                 return;
 

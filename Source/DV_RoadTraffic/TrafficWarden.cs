@@ -56,7 +56,7 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            if (Input.GetKey(KeyCode.LeftAlt) && Input.GetKeyDown(KeyCode.G))
+            if (Main.Settings.ToggleGunType.IsPressed())
             {
                 weaponMode = weaponMode == WeaponMode.Projectile
                     ? WeaponMode.Raygun
@@ -73,7 +73,7 @@ namespace DV_RoadTraffic
 
         void HandleToggle()
         {
-            if (Input.GetKey(KeyCode.LeftAlt) && Input.GetKeyDown(KeyCode.W))
+            if (Main.Settings.ToggleTrafficWarden.IsPressed())
             {
                 enabledMode = !enabledMode;
 

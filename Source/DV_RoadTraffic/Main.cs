@@ -43,7 +43,7 @@ namespace DV_RoadTraffic {
 
                 modEntry.OnGUI = OnGUI;
                 modEntry.OnSaveGUI = OnSaveGUI;
-                modEntry.OnUpdate = Update;   // ← your preferred naming
+                modEntry.OnUpdate = Update;  
 
                 Harmony = new Harmony(modEntry.Info.Id);
                 Harmony.PatchAll();

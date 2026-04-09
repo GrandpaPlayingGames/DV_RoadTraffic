@@ -511,7 +511,7 @@ namespace DV_RoadTraffic
                 Transform root = lod.transform;
                 if (root == null)
                     continue;
-                
+
                 // Distance filter
                 float dist = Vector3.Distance(
                     root.position,
@@ -575,13 +575,10 @@ namespace DV_RoadTraffic
                     cleanName.Contains("TruckMedium90sTrailer_01_Orange") ||
                     cleanName.Contains("MiningTruckWheelOld") ||
                     cleanName.Contains("FarmTractor1")||
-                cleanName.Contains("[interior]")) 
+                    cleanName.Contains("[interior]")) 
                     continue;
 
-                // Exclude TrainCar
-                if (root.GetComponent<TrainCar>() != null ||
-                    root.GetComponentInParent<TrainCar>() != null ||
-                    root.GetComponentInChildren<TrainCar>(true) != null)
+                if (root.GetComponentInParent<TrainCar>() != null)
                     continue;
 
                 if (cleanName.Contains("Flatcar") ||

@@ -22,12 +22,9 @@ namespace DV_RoadTraffic
             rb.velocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
 
-            float impactSpeed = 10f; // default fallback
+            float impactSpeed = 10f; 
             Vector3 launch;
 
-            // =========================================================
-            // COLLISION PATH (NOT CURRENTLY USED / COLLISIONS INACTIVE)
-            // =========================================================
             if (collision != null)
             {
                 Main.Log("[DVRT] IMPACT via COLLISION path");
@@ -48,9 +45,6 @@ namespace DV_RoadTraffic
                 launch = lateral + Vector3.up * vertical;
             }
 
-            // =========================================================
-            // 🔹 NULL COLLISION PATH 
-            // =========================================================
             else
             {
                 Main.Log("[DVRT] IMPACT via NULL collision path");
@@ -75,7 +69,7 @@ namespace DV_RoadTraffic
                     direction = -vehicle.transform.forward;
                 }
                 
-                impactSpeed = 12f; // consistent visual force (tune if needed)
+                impactSpeed = 12f; 
 
                 float clampedSpeed = Mathf.Clamp(impactSpeed, 0f, 12f);
 

@@ -1,7 +1,9 @@
-﻿using System;
+﻿using DV_RoadTraffic;
+using HarmonyLib;
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityModManagerNet;
-using HarmonyLib;
 
 namespace DV_RoadTraffic { 
     public static class Main
@@ -32,6 +34,7 @@ namespace DV_RoadTraffic {
                 return _cachedProvider != null && _cachedProvider.IsGameLoaded;
             }
         }
+
 
         public static bool Load(UnityModManager.ModEntry modEntry)
         {
@@ -100,9 +103,9 @@ namespace DV_RoadTraffic {
             Settings.Save(modEntry);
         }
 
+        
         private static void Update(UnityModManager.ModEntry modEntry, float dt)
         {
-  
             if (!_loaded)
                 return;
 
@@ -113,7 +116,10 @@ namespace DV_RoadTraffic {
 
             DVRT_Manager.Update(dt);
         }
-       
+        
+
+        
+
         private static void CheckGameLoadedOnce()
         {
             if (_cachedProvider == null)
@@ -125,9 +131,6 @@ namespace DV_RoadTraffic {
 
             bool isLoaded = _cachedProvider.IsGameLoaded;
 
-            // =========================================================
-            // UNLOAD TRANSITION
-            // =========================================================
             if (_wasGameLoaded && !isLoaded)
             {
                 Log("[DVRT] Game unloading...");
@@ -151,6 +154,15 @@ namespace DV_RoadTraffic {
             {
                 Log("[DVRT] Game loaded");
                 _gameLoadedFired = false;
+
+                if (_sessionInitialized && _fastTravelInProgress)
+                {
+                    _fastTravelInProgress = false;
+
+                    Log("[DVRT] Fast travel completed.");
+
+                    DVRT_Manager.RefreshBarriersAfterFastTravel();
+                }
             }
 
             if (!isLoaded)
@@ -203,5 +215,6 @@ namespace DV_RoadTraffic {
             _fastTravelInProgress = true;
             Log("[DVRT] Fast travel detected.");
         }
-    }    
+    }
 }
+

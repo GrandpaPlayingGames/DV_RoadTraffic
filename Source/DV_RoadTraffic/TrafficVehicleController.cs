@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 
 namespace DV_RoadTraffic
@@ -68,6 +69,23 @@ namespace DV_RoadTraffic
         private float vehicleLength;
         private float vehicleHalfLength;
 
+        // =====================================================
+        // VEHICLE COLLISION PREVENTION
+        // =====================================================
+        private HashSet<TrafficVehicleController> ignoredVehicles = new HashSet<TrafficVehicleController>();
+        private float ignoreTimer = 0f;
+
+        private const float IGNORE_RADIUS = 25f;
+        private const float IGNORE_INTERVAL = 0.5f;
+
+        private int dvrtMask;
+        private Collider[] cachedColliders;
+        private bool ignoreInitialized = false;
+
+        private const int IGNORE_BUFFER_SIZE = 32;
+        private readonly Collider[] _ignoreOverlapBuffer =
+            new Collider[IGNORE_BUFFER_SIZE];
+
 
         // =====================================================
         // TRAFFIC / INTERACTION
@@ -94,6 +112,10 @@ namespace DV_RoadTraffic
         // =====================================================
         private float barrierDetectDistance = 12f;
         private Transform barrierAhead = null;
+        Transform lastDetectedBarrier = null;
+        bool hasPassedFirstBarrier = false;
+        Transform firstBarrier = null;
+        Transform secondBarrier = null;
 
 
         // =====================================================
@@ -105,7 +127,15 @@ namespace DV_RoadTraffic
         private float ghostEndTime;       
         private List<Renderer> ghostRenderers = new List<Renderer>();
 
-        
+        // =====================================================
+        // RATE-LIMITED DETECTION
+        // =====================================================
+        private const float TRAFFIC_DETECTION_INTERVAL = 0.10f;
+        private const float TRAIN_DETECTION_INTERVAL = 0.10f;
+
+        private float nextTrafficDetectionTime;
+        private float nextTrainDetectionTime;
+
         // =====================================================
         // STUCK DETECTION
         // =====================================================
@@ -139,6 +169,16 @@ namespace DV_RoadTraffic
         // =====================================================
         private float nextHornTime = 0f;
 
+        // =====================================================
+        // HEADLIGHTS
+        // =====================================================
+        private Light headlight;
+        private bool headlightsInitialized = false;
+        private float headlightOnTime;
+        private float headlightOffTime;
+        private static object _weatherDriver;
+        private static PropertyInfo _todProp;
+        private static PropertyInfo _realProp;
 
         // =====================================================
         // COLLISION / IMPACT
@@ -184,9 +224,12 @@ namespace DV_RoadTraffic
 
             BuildSingleCollider();
             SetupRigidbody();
+            SetupHeadlight();
+
+            IgnoreDVLevelCrossingBarriers(Factory.NearbyBarriers);
+            
             lastPosition = transform.position;
 
-            //DebugShowColliders();
             string group = DVRT_SoundLibrary.DetermineVehicleGroup(cleanName);
 
             var engineClip = DVRT_SoundLibrary.GetRandomEngine(group);
@@ -201,53 +244,111 @@ namespace DV_RoadTraffic
 
             ghostRenderers = GetComponentsInChildren<Renderer>(true).ToList();
 
+            cachedColliders = GetComponentsInChildren<Collider>();
+
+            int layer = gameObject.layer;
+
+            Main.Log($"[Collisions] Vehicle using layer {layer}");
+
+            dvrtMask = 1 << layer;
+
+            headlightOnTime = 18f + UnityEngine.Random.Range(0f, 0.25f);
+            headlightOffTime = 7f + UnityEngine.Random.Range(0f, 0.25f);
+
+            Main.Log($"[DVRT] {name} headlights ON at {headlightOnTime:F2}, OFF at {headlightOffTime:F2}");
+
+            nextTrafficDetectionTime =
+                Time.time + UnityEngine.Random.Range(0f, TRAFFIC_DETECTION_INTERVAL);
+
+            nextTrainDetectionTime =
+                Time.time + UnityEngine.Random.Range(0f, TRAIN_DETECTION_INTERVAL);
+
+
             initialized = true;
         }
- 
+
+        private int lastBlockState = 0;
+
         private void FixedUpdate()
         {
-            if (!initialized) return;
+            if (!initialized)
+                return;
 
-            if (!physicsMode)
+            if (physicsMode)
+                return;
+
+            float now = Time.time;
+
+            if (now >= nextTrafficDetectionTime)
             {
+                nextTrafficDetectionTime =
+                    now + TRAFFIC_DETECTION_INTERVAL;
+
                 DetectVehicleAhead();
                 DetectBarrierAhead();
+            }
+
+            bool runTrainChecks = now >= nextTrainDetectionTime;
+
+            if (runTrainChecks)
+            {
+                nextTrainDetectionTime =
+                    now + TRAIN_DETECTION_INTERVAL;
+
                 DetectTrainAhead();
                 DetectTrainTooClose();
                 DetectTrainContact();
-                DetectDeadlock();
-                bool nowBlocked =
-                    vehicleAhead != null ||
-                    barrierAhead != null ||
-                    trainAhead != null ||
-                    isWaitingAtStopMarker;
-
-                if (!nowBlocked && isLegitimatelyBlocked)
-                {
-                    stuckTime = 0f;
-                }
-                isLegitimatelyBlocked = nowBlocked;
-            
-                ApplyTrafficFollowing();
-                MoveForwardDeterministic();
-
-                DetectTrainImpact();
-
-                CheckTTL();
-                CheckIfStuck();
-                TryRandomHorn();
             }
-           
-        }
 
+            DetectDeadlock();
+
+            int currentBlockState =
+                vehicleAhead != null ? 1 :
+                barrierAhead != null ? 2 :
+                trainAhead != null ? 3 :
+                isWaitingAtStopMarker ? 4 :
+                0;
+
+            if (currentBlockState != lastBlockState)
+            {
+                stuckTime = 0f;
+            }
+
+            lastBlockState = currentBlockState;
+
+            isLegitimatelyBlocked = currentBlockState != 0;
+
+            ApplyTrafficFollowing();
+            MoveForwardDeterministic();
+
+            if (runTrainChecks)
+            {
+                DetectTrainImpact();
+            }
+
+            CheckTTL();
+            CheckIfStuck();
+            TryRandomHorn();
+
+            ignoreTimer += Time.fixedDeltaTime;
+
+            if (!ignoreInitialized)
+            {
+                ignoreInitialized = true;
+                UpdateNearbyIgnores();
+            }
+            else if (ignoreTimer >= IGNORE_INTERVAL)
+            {
+                ignoreTimer = 0f;
+                UpdateNearbyIgnores();
+            }
+        }
         void LateUpdate()
         {
             Vector3 shift = DVRT_WorldShiftManager.CurrentMove;
 
-            // update canonical baseline
             _lastKnownCanonical = transform.position - shift;
 
-            // --- safety check ---
             Vector3 expected = _lastKnownCanonical + shift;
 
             if ((transform.position - expected).sqrMagnitude > 25f)
@@ -259,7 +360,47 @@ namespace DV_RoadTraffic
         void OnDestroy()
         {
             DVRT_WorldShiftManager.OnWorldShift -= ApplyWorldShift;
+
             DVRT_Manager.ActiveVehicles.Remove(this);
+
+            if (Factory != null)
+                Factory.ActiveVehicles.Remove(this);
+        }
+
+        void UpdateNearbyIgnores()
+        {
+            int hitCount = Physics.OverlapSphereNonAlloc(
+                transform.position,
+                IGNORE_RADIUS,
+                _ignoreOverlapBuffer,
+                dvrtMask,
+                QueryTriggerInteraction.Ignore
+            );
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider hit = _ignoreOverlapBuffer[i];
+
+                if (hit == null)
+                    continue;
+
+                TrafficVehicleController other =
+                    hit.GetComponentInParent<TrafficVehicleController>();
+
+                if (other == null || other == this)
+                    continue;
+
+                if (ignoredVehicles.Contains(other))
+                    continue;
+
+                IgnoreBetween(this, other);
+
+                ignoredVehicles.Add(other);
+                other.ignoredVehicles.Add(this);
+            }
+
+            for (int i = 0; i < hitCount; i++)
+                _ignoreOverlapBuffer[i] = null;
         }
 
         public static void _______________SETUP_________________()
@@ -280,17 +421,14 @@ namespace DV_RoadTraffic
             rb.useGravity = true;
             rb.drag = 0f;
             rb.angularDrag = 2f;
-
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
 
-            // Slightly lower COM for stability
             rb.centerOfMass = new Vector3(0f, -0.5f, 0f);
         }
 
         public Bounds BuildSingleCollider()
         {
-            // Remove inherited colliders
             var existing = GetComponentsInChildren<Collider>(true);
             for (int i = 0; i < existing.Length; i++)
                 Destroy(existing[i]);
@@ -302,7 +440,6 @@ namespace DV_RoadTraffic
 
             foreach (var r in renderers)
             {
-                // Ignore trailer meshes on semi trucks
                 if (r.name.Contains("_01b"))
                     continue;
 
@@ -335,7 +472,6 @@ namespace DV_RoadTraffic
 
             localCenter.x = 0f;
 
-            // lift collider slightly so wheels sit on road
             localCenter.y += bounds.size.y * 0.025f;
 
             box.center = localCenter;
@@ -348,12 +484,83 @@ namespace DV_RoadTraffic
             if (width > 2.8f)
                 width = 2.8f;
 
-            // Store vehicle length for turning behaviour
             vehicleLength = length;
 
             box.size = new Vector3(width, size.y, length);
 
             return bounds;
+        }
+
+        private void SetupHeadlight()
+        {
+            if (headlightsInitialized)
+                return;
+
+            headlightsInitialized = true;
+
+            var col = GetComponent<Collider>();
+            if (col == null)
+            {
+                Main.Log($"[DVRT] No collider found for headlight setup on {name}");
+                return;
+            }
+
+            float halfLength = col.bounds.extents.z;
+
+            Vector3 lightPos =
+                transform.position +
+                transform.forward * (halfLength + 0.3f) +
+                Vector3.up * 0.8f;
+
+            GameObject lightGO = new GameObject("Headlight");
+            lightGO.transform.SetParent(transform);
+
+            lightGO.transform.position = lightPos;
+            lightGO.transform.rotation =
+                Quaternion.LookRotation(transform.forward + Vector3.down * 0.15f, Vector3.up);
+
+            var light = lightGO.AddComponent<Light>();
+            light.type = LightType.Spot;
+            light.range = 35f;
+            light.spotAngle = 50f;
+            light.intensity = 3f;
+            light.color = new Color(1f, 0.95f, 0.85f);
+            light.shadows = LightShadows.None;
+            light.enabled = false;
+
+            headlight = light;
+
+            Main.Log($"[DVRT] Headlight created for {name}");
+        }
+
+        public void IgnoreDVLevelCrossingBarriers(List<Transform> nearbyBarriers)
+        {
+            if (nearbyBarriers == null || nearbyBarriers.Count == 0)
+                return;
+
+            Collider[] myColliders = GetComponentsInChildren<Collider>(true);
+
+            if (myColliders == null || myColliders.Length == 0)
+                return;
+
+            foreach (var barrierTransform in nearbyBarriers)
+            {
+                if (barrierTransform == null)
+                    continue;
+
+                Collider barrierCol = barrierTransform.GetComponent<Collider>();
+
+                if (barrierCol == null)
+                    continue;
+
+                foreach (var myCol in myColliders)
+                {
+                    if (myCol == null)
+                        continue;
+
+                    Physics.IgnoreCollision(myCol, barrierCol, true);
+                }
+            }
         }
 
         public static void _______________MOVEMENT_________________()
@@ -389,7 +596,6 @@ namespace DV_RoadTraffic
             {
                 Vector3 local = transform.InverseTransformPoint(activeTurnTarget.position);
 
-                // If target has moved behind us, we must have passed it
                 if (local.z < 0f)
                 {
                     pendingTurnTarget = activeTurnTarget;
@@ -404,8 +610,7 @@ namespace DV_RoadTraffic
                 Vector3 local = transform.InverseTransformPoint(pendingTurnTarget.position);
 
                 if (local.z < vehicleHalfLength)
-                {
-                    // stop pursuit steering
+                {                    
                     activeTurnTarget = null;
 
                     exitHeading = pendingTurnTarget.eulerAngles.y;
@@ -414,11 +619,7 @@ namespace DV_RoadTraffic
                     pendingTurnTarget = null;
                 }
             }
-            
 
-            // --------------------------
-            // PURE PURSUIT TURNING
-            // --------------------------
             if (activeTurnTarget != null)
             {
                 Vector3 targetPos = activeTurnTarget.position;
@@ -445,16 +646,13 @@ namespace DV_RoadTraffic
                 steeringBias = Mathf.Lerp(steeringBias, 0f, 5f * Time.fixedDeltaTime);
             }
 
-            // ---------------------------------
-            // EXIT ALIGNMENT
-            // ---------------------------------
             if (aligningToExit)
             {
                 float currentYaw = transform.eulerAngles.y;
 
                 float delta = Mathf.DeltaAngle(currentYaw, exitHeading);
 
-                float step = 45f * Time.fixedDeltaTime; // alignment speed
+                float step = 45f * Time.fixedDeltaTime; 
 
                 float turn = Mathf.Clamp(delta, -step, step);
 
@@ -468,10 +666,6 @@ namespace DV_RoadTraffic
                     aligningToExit = false;
                 }
             }
-
-            // --------------------------
-            // FORWARD MOVEMENT
-            // --------------------------
  
             float desiredSpeed = Mathf.Min(targetSpeed, trafficSpeedLimit);
             currentSpeed = Mathf.Lerp(currentSpeed, desiredSpeed, 1.5f * Time.fixedDeltaTime);
@@ -524,22 +718,42 @@ namespace DV_RoadTraffic
 
         void DetectBarrierAhead()
         {
+            if (isGhosted)
+                return;
 
-            if (isGhosted) return;
-
+            Transform detectedAhead = null;
             barrierAhead = null;
 
             float closestDistSq = float.MaxValue;
-            float detectDistSq = barrierDetectDistance * barrierDetectDistance;
+            float detectDistSq =
+                barrierDetectDistance * barrierDetectDistance;
+
+            int validBarrierCount = 0;
+            float closestAnyDistance = float.MaxValue;
+            float closestAnyForwardDot = 0f;
+            Transform closestAnyBarrier = null;
 
             foreach (var barrier in Factory.NearbyBarriers)
             {
                 if (barrier == null)
                     continue;
 
-                Vector3 toBarrier = barrier.position - transform.position;
-                
-                float forwardDot = Vector3.Dot(transform.forward, toBarrier);
+                validBarrierCount++;
+
+                Vector3 toBarrier =
+                    barrier.position - transform.position;
+
+                float distance = toBarrier.magnitude;
+                float forwardDot =
+                    Vector3.Dot(transform.forward, toBarrier);
+
+                if (distance < closestAnyDistance)
+                {
+                    closestAnyDistance = distance;
+                    closestAnyForwardDot = forwardDot;
+                    closestAnyBarrier = barrier;
+                }
+
                 if (forwardDot <= 0f)
                     continue;
 
@@ -551,86 +765,139 @@ namespace DV_RoadTraffic
                 if (distSq < closestDistSq)
                 {
                     closestDistSq = distSq;
-                    barrierAhead = barrier;
+                    detectedAhead = barrier;
                 }
             }
-
-            if (barrierAhead != null)
+ 
+            if (detectedAhead == null)
             {
-                float z = barrierAhead.eulerAngles.z;
-
-                Main.Log($"[DVRT] BARRIER AHEAD DETECTED | {cleanName} | dist={Mathf.Sqrt(closestDistSq):F2} | speed={currentSpeed:F2}");
-                Main.Log($"[DVRT] Barrier z euler is {z}");
-
-                // if barrier is raised ignore it
-                if (z > 45f)
+                if (firstBarrier != null && secondBarrier != null)
                 {
-                    barrierAhead = null;
+                    firstBarrier = null;
+                    secondBarrier = null;
                 }
+
+                return;
             }
+
+            float z = detectedAhead.eulerAngles.z;
+            bool isLowered = z <= 45f;
+
+            if (!Main.Settings.allowVehicleEscape)
+            {
+                firstBarrier = null;
+                secondBarrier = null;
+
+                if (isLowered)
+                {
+                    barrierAhead = detectedAhead; 
+                }
+
+                return;
+            }
+
+            // 🔥 FIRST barrier
+            if (firstBarrier == null)
+            {
+                firstBarrier = detectedAhead;
+
+                Main.Log("[DVRT] First barrier detected");
+
+                if (isLowered)
+                {
+                    barrierAhead = detectedAhead; 
+                }
+
+                return;
+            }
+
+            if (detectedAhead == firstBarrier)
+            {
+                if (isLowered)
+                {
+                    barrierAhead = detectedAhead; 
+                }
+
+                return;
+            }
+
+            if (secondBarrier == null)
+            {
+                secondBarrier = detectedAhead;
+
+                Main.Log("[DVRT] Second barrier detected → entering escape mode");
+
+                barrierAhead = null; 
+
+                return;
+            }
+
+            barrierAhead = null;
         }
+
 
         void DetectVehicleAhead()
         {
             vehicleAhead = null;
 
-            var vehicles = DVRT_Manager.ActiveVehicles;
+            if (Factory == null)
+                return;
+
+            List<TrafficVehicleController> vehicles =
+                Factory.ActiveVehicles;
 
             float closestDistSq = float.MaxValue;
-            float detectDistSq = trafficDetectDistance * trafficDetectDistance;
 
-            foreach (var other in vehicles)
+            Vector3 forwardDir = transform.forward;
+
+            if (activeTurnTarget != null)
             {
-                if (other == this)
+                Vector3 toTarget =
+                    activeTurnTarget.position - transform.position;
+
+                toTarget.y = 0f;
+
+                if (toTarget.sqrMagnitude > 0.1f)
+                    forwardDir = toTarget.normalized;
+            }
+
+            Vector3 rightDir =
+                Vector3.Cross(Vector3.up, forwardDir);
+
+            float laneWidth =
+                activeTurnTarget != null ? 3.0f : 2.0f;
+
+            Vector3 myPosition = transform.position;
+
+            const float lengthFactor = 0.75f;
+
+            for (int i = 0; i < vehicles.Count; i++)
+            {
+                TrafficVehicleController other =
+                    vehicles[i];
+
+                if (other == null || other == this)
                     continue;
 
-                if (other.routeName != routeName)
+                Vector3 toOther =
+                    other.transform.position - myPosition;
+
+                float localZ =
+                    Vector3.Dot(toOther, forwardDir);
+
+                if (localZ <= 0f)
                     continue;
 
-                if (!other.gameObject.name.Contains("_TrafficClone"))
+                float localX =
+                    Vector3.Dot(toOther, rightDir);
+
+                if (Mathf.Abs(localX) > laneWidth)
                     continue;
 
-                Vector3 toOther = other.transform.position - transform.position;
-
-                // -------------------------------------------------------
-                // USE PATH DIRECTION, NOT JUST VEHICLE FACING DIRECTION
-                // -------------------------------------------------------
-                Vector3 forwardDir = transform.forward;
-
-                if (activeTurnTarget != null)
-                {
-                    Vector3 toTarget = activeTurnTarget.position - transform.position;
-                    toTarget.y = 0f;
-
-                    if (toTarget.sqrMagnitude > 0.1f)
-                        forwardDir = toTarget.normalized;
-                }
-
-                Vector3 rightDir = Vector3.Cross(Vector3.up, forwardDir);
-
-                Vector3 local = new Vector3(
-                    Vector3.Dot(toOther, rightDir),
-                    0f,
-                    Vector3.Dot(toOther, forwardDir)
-                );
-
-                if (local.z <= 0f)
-                    continue;
-
-                float laneWidth = activeTurnTarget != null ? 3.0f : 2.0f;
-
-                if (Mathf.Abs(local.x) > laneWidth)
-                    continue;
-
-                float rawDist = local.z;
-
-                float lengthFactor = 0.75f; // <-- tuning knob
-
-                float clearance = rawDist
-                    - (this.vehicleLength * 0.5f * lengthFactor)
+                float clearance =
+                    localZ
+                    - (vehicleLength * 0.5f * lengthFactor)
                     - (other.vehicleLength * 0.5f * lengthFactor);
-
-                float distSq = clearance * clearance;
 
                 if (clearance > trafficDetectDistance)
                     continue;
@@ -638,13 +905,16 @@ namespace DV_RoadTraffic
                 if (clearance < 0f)
                 {
                     vehicleAhead = other;
-                    break; // already overlapping → immediate stop case
+                    break;
                 }
+
+                float distSq =
+                    clearance * clearance;
 
                 if (distSq < closestDistSq)
                 {
                     closestDistSq = distSq;
-                    vehicleAhead = other;                    
+                    vehicleAhead = other;
                 }
             }
         }
@@ -721,7 +991,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // ⚠️ CAUTION if player train (outside lane, but relevant)
             if (lastLoco != null && closestTrain == lastLoco)
             {
                 float dist = Mathf.Sqrt(closestDistSq);
@@ -755,12 +1024,9 @@ namespace DV_RoadTraffic
             TrainCar closestTrain = null;
             bool closestInLane = false;
 
-            // -------------------------
-            // FRONT / BACK OF VEHICLE
-            // -------------------------
             Collider col = GetComponent<Collider>();
 
-            float halfLength = 2.5f; // fallback
+            float halfLength = 2.5f; 
             if (col != null)
                 halfLength = Mathf.Max(halfLength, col.bounds.extents.z);
 
@@ -776,14 +1042,12 @@ namespace DV_RoadTraffic
                 if (tc == null)
                     continue;
 
-                // Distance from FRONT bumper → hit point
                 Vector3 toHit = hit.point - front;
                 float forwardDist = Vector3.Dot(transform.forward, toHit);
 
                 if (forwardDist < 0f)
-                    continue; // behind us
+                    continue; 
 
-                // Lane check
                 Vector3 local = transform.InverseTransformPoint(hit.point);
                 bool isInLane = Mathf.Abs(local.x) < laneWidth;
 
@@ -795,18 +1059,8 @@ namespace DV_RoadTraffic
                 }
             }
 
-            // Debug
-            if (closestTrain != null)
-            {
-                Main.Log($"[DVRT] frontDist={closestForwardDist:F2} | {gameObject.name}");
-            }
-
-            // -------------------------
-            // GHOST LOGIC
-            // -------------------------
             float ghostEnterDistance = 3.0f;
 
-            // ENTER
             if (!isGhosted)
             {
                 if (closestTrain != null && closestInLane && closestForwardDist < ghostEnterDistance)
@@ -815,14 +1069,12 @@ namespace DV_RoadTraffic
 
                     EnableGhostMode(closestTrain);
 
-                    float baseTime = 3.0f; // baseline
+                    float baseTime = 3.0f; 
 
                     float vehicleLength = halfLength * 2f;
 
-                    // Scale factor (tweak this)
                     float extraTimePerMeter = 0.15f;
 
-                    // Final duration
                     float duration = baseTime + (vehicleLength * extraTimePerMeter);
 
                     ghostEndTime = Time.time + duration;
@@ -881,9 +1133,6 @@ namespace DV_RoadTraffic
                 break;
             }
 
-            // -------------------------
-            // STILL NEAR TRAIN → EXTEND GHOST
-            // -------------------------
             if (trainNearby)
             {
                 if (!isGhosted)
@@ -892,15 +1141,11 @@ namespace DV_RoadTraffic
                     EnableGhostMode(detectedTrain);
                 }
 
-                // 🔑 Keep extending while dangerous
                 ghostEndTime = Time.time + 2.0f;
 
                 return;
             }
 
-            // -------------------------
-            // CLEAR → EXIT WHEN TIMER EXPIRES
-            // -------------------------
             if (isGhosted && Time.time >= ghostEndTime)
             {
                 Main.Log($"[DVRT] CLEAR → EXIT GHOST | {gameObject.name}");
@@ -928,7 +1173,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // Check if both vehicles block each other
             bool mutualBlock = other.vehicleAhead == this;
 
             if (!mutualBlock)
@@ -938,7 +1182,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // Ignore legitimate stops
             if (barrierAhead != null || isWaitingAtStopMarker ||
                 other.barrierAhead != null || other.isWaitingAtStopMarker)
             {
@@ -973,9 +1216,6 @@ namespace DV_RoadTraffic
         {
             trafficSpeedLimit = float.MaxValue;
 
-            // -------------------------
-            // VEHICLE AHEAD
-            // -------------------------
             if (vehicleAhead != null && !deadlockOverride)
             { 
                 Vector3 myFront = transform.position + transform.forward * (vehicleLength * 0.5f);
@@ -983,7 +1223,7 @@ namespace DV_RoadTraffic
 
                 float distance = Vector3.Distance(myFront, otherBack);
 
-                float minGap = 2.0f; // tweak per vehicle type later
+                float minGap = 2.0f; 
                 float ratio = Mathf.Clamp01((distance - minGap) / (trafficDetectDistance - minGap));
 
                 float limit =
@@ -992,16 +1232,13 @@ namespace DV_RoadTraffic
                 trafficSpeedLimit = Mathf.Min(trafficSpeedLimit, limit);
             }
 
-            // -------------------------
-            // BARRIER AHEAD
-            // -------------------------
             if (barrierAhead != null)
             {
                 float dist =
                    Vector3.Distance(transform.position, barrierAhead.position);
 
-                float brakeStart = 8f;     // start braking distance
-                float stopBuffer = 3.5f;   // final stop distance
+                float brakeStart = 8f;     
+                float stopBuffer = 3.5f;   
 
                 float ratio =
                     Mathf.Clamp01((dist  - stopBuffer) / (brakeStart - stopBuffer));
@@ -1014,9 +1251,6 @@ namespace DV_RoadTraffic
 
             }
 
-            // -------------------------
-            // TRAIN AHEAD (BLOCKING)
-            // -------------------------
             if (trainAhead != null)
             {
                 Vector3 myFront =
@@ -1040,9 +1274,6 @@ namespace DV_RoadTraffic
                     Mathf.Min(trafficSpeedLimit, limit);
             }
 
-            // -------------------------
-            // TRAIN CAUTION (PLAYER)
-            // -------------------------
             if (cautiousForTrain)
             {
                 float cautiousSpeed = routeTargetSpeed * 0.6f;
@@ -1051,7 +1282,19 @@ namespace DV_RoadTraffic
                     Mathf.Min(trafficSpeedLimit, cautiousSpeed);
             }
         }
-        
+
+        bool IsDVLevelCrossingBarrier(Transform barrierRoot)
+        {
+            if (barrierRoot == null)
+                return false;
+
+            var signal = barrierRoot.Find("RailwayCrossingSignal");
+            if (signal == null)
+                return false;
+
+            return signal.GetComponent<AudioSource>() != null;
+        }
+
         private bool gtaImpactHandled = false;
   
         private void OnCollisionEnter(Collision collision)
@@ -1071,7 +1314,6 @@ namespace DV_RoadTraffic
 
             Main.Log($"[DVRT_Collision] OnCollisionEnter triggered on {gameObject.name}");
 
-            // 🔥 FIX: pass TrainCar + collision
             GTAImpactHandler.HandleTrainImpact(this, train, collision);
         }
 
@@ -1092,7 +1334,6 @@ namespace DV_RoadTraffic
 
             Main.Log($"[DVRT_Collision] OnCollisionStay fallback triggered on {gameObject.name}");
 
-            // 🔥 IMPORTANT: pass train, not just collision
             GTAImpactHandler.HandleTrainImpact(this, train, collision);
         }
 
@@ -1106,7 +1347,6 @@ namespace DV_RoadTraffic
             if (marker == null)
                 return;
 
-            // DEBUG: log marker encounter
             Main.Log(
                 $"[DVRT] VEHICLE {gameObject.name} ({GetInstanceID()}) " +
                 $"route='{routeName}' encountered marker {marker.MarkerID} " +
@@ -1117,9 +1357,6 @@ namespace DV_RoadTraffic
             if (marker.RouteName != routeName)
                 return;        
 
-            // ------------------------------
-            // TURN TO MARKER
-            // ------------------------------
             if (marker.Type == TrafficMarker.MarkerType.TurnTo)
             {
                 if (!string.IsNullOrEmpty(lastMarkerEncountered) &&
@@ -1137,17 +1374,12 @@ namespace DV_RoadTraffic
                 if (target == null)
                     return;
 
-                // Override previous turn state
                 pendingTurnTarget = null;
                 aligningToExit = false;
 
                 activeTurnTarget = target.Root.transform;
                 return;
             }
-
-            // ------------------------------
-            // RANDOMLY TURN TO MARKER
-            // ------------------------------
 
             if (marker.Type == TrafficMarker.MarkerType.RandomlyTurnTo)
             {
@@ -1175,7 +1407,6 @@ namespace DV_RoadTraffic
                 if (target == null)
                     return;
 
-                // Override previous turn state
                 pendingTurnTarget = null;
                 aligningToExit = false;
 
@@ -1183,13 +1414,8 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // ------------------------------
-            // TURN TARGET MARKER
-            // ------------------------------
-
             if (marker.Type == TrafficMarker.MarkerType.TurnTarget)
             {
-                // Ignore targets that are not the one we were instructed to follow
                 if (activeTurnTarget == null || marker.Root.transform != activeTurnTarget)
                     return;
 
@@ -1210,7 +1436,6 @@ namespace DV_RoadTraffic
 
                 pendingTurnTarget = marker.Root.transform;
 
-                // Debug alignment tracking
                 debugAlignment = true;
                 debugNextLogTime = Time.time;
                 debugDesiredHeading = desired;
@@ -1218,9 +1443,6 @@ namespace DV_RoadTraffic
                     $"[DVRT] ALIGN START | {gameObject.name} ({GetInstanceID()}) | current={current:F1} target={desired:F1}");
             }
            
-            // ------------------------------
-            // SPEED UP
-            // ------------------------------
             if (marker.Type == TrafficMarker.MarkerType.SpeedUp)
             {
                 int level = marker.SpeedLevel;
@@ -1231,9 +1453,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // ------------------------------
-            // SLOW DOWN
-            // ------------------------------
             if (marker.Type == TrafficMarker.MarkerType.SlowDown)
             {
                 int level = marker.SpeedLevel;
@@ -1278,7 +1497,6 @@ namespace DV_RoadTraffic
             var cam = Camera.main;
             if (cam == null)
             {
-                Main.Log("[DVRT] Camera.main is NULL in TryRandomHorn");
                 return;
             }
 
@@ -1300,7 +1518,35 @@ namespace DV_RoadTraffic
 
                 nextHornTime = Time.time + UnityEngine.Random.Range(5f, 15f);
             }
-        }                
+        }
+
+        public static void _______________HEADLIGHTS_________________()
+        {
+        }
+
+        public void UpdateHeadlights(float currentHour)
+        {
+            if (headlight == null)
+                return;
+
+            bool shouldBeOn;
+
+            if (currentHour >= headlightOnTime || currentHour < headlightOffTime)
+                shouldBeOn = true;
+            else
+                shouldBeOn = false;
+
+            if (headlight.enabled != shouldBeOn)
+                headlight.enabled = shouldBeOn;
+        }
+
+        public void SetHeadlights(bool on)
+        {
+            if (headlight == null)
+                return;
+
+            headlight.enabled = on;
+        }
 
         public static void __________BLOWING_SHIT_UP_______________()
         {
@@ -1360,7 +1606,6 @@ namespace DV_RoadTraffic
 
         bool ghostDebug = true;
 
-        // Cache original colors per renderer/material index
         private Dictionary<Renderer, Color[]> originalColors = new Dictionary<Renderer, Color[]>();
 
         private int ghostEnterCount = 0;
@@ -1373,113 +1618,22 @@ namespace DV_RoadTraffic
             Color.cyan
         };
 
-        /*
-        void EnableGhostMode(TrainCar tc)
+          void EnableGhostMode(TrainCar tc)
         {
             if (isGhosted)
                 return;
 
             isGhosted = true;
 
-            // Cache renderers once if needed
             if (ghostRenderers.Count == 0)
                 ghostRenderers = GetComponentsInChildren<Renderer>(true).ToList();
 
-            // -------------------------
-            // VISUAL HANDLING
-            // -------------------------
-            if (!ghostDebug)
-            {
-                // Disable rendering (original behavior)
-                foreach (var r in ghostRenderers)
-                {
-                    if (r != null)
-                        r.enabled = false;
-                }
-            }
-            else
-            {
-                // Increment entry count
-                ghostEnterCount++;
-
-                int colorIndex = Mathf.Clamp(ghostEnterCount - 1, 0, ghostDebugColors.Length - 1);
-                Color debugColor = ghostDebugColors[colorIndex];
-
-                Main.Log($"[DVRT] GHOST DEBUG COLOR = {debugColor} | entry #{ghostEnterCount}");
-
-                foreach (var r in ghostRenderers)
-                {
-                    if (r == null)
-                        continue;
-
-                    var mats = r.materials;
-
-                    if (!originalColors.ContainsKey(r))
-                    {
-                        Color[] cols = new Color[mats.Length];
-
-                        for (int i = 0; i < mats.Length; i++)
-                        {
-                            if (mats[i].HasProperty("_Color"))
-                                cols[i] = mats[i].color;
-                            else
-                                cols[i] = Color.white;
-                        }
-
-                        originalColors[r] = cols;
-                    }
-
-                    for (int i = 0; i < mats.Length; i++)
-                    {
-                        if (mats[i].HasProperty("_Color"))
-                            mats[i].color = debugColor;
-                        else if (mats[i].HasProperty("_BaseColor"))
-                            mats[i].SetColor("_BaseColor", debugColor);
-                    }
-                }
-            }
-
-            // -------------------------
-            // COLLISION / PHYSICS 
-            // -------------------------
- 
-            Rigidbody rb = GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                rb.isKinematic = true;
-                rb.detectCollisions = false;
-
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-            }
-
-            Main.Log("[DVRT] GHOST ENABLED");
-        }
-        */
-
-        void EnableGhostMode(TrainCar tc)
-        {
-            if (isGhosted)
-                return;
-
-            isGhosted = true;
-
-            // Cache renderers once if needed
-            if (ghostRenderers.Count == 0)
-                ghostRenderers = GetComponentsInChildren<Renderer>(true).ToList();
-
-            // -------------------------
-            // VISUAL HANDLING (always hide)
-            // -------------------------
             foreach (var r in ghostRenderers)
             {
                 if (r != null)
                     r.enabled = false;
             }
 
-            // -------------------------
-            // COLLISION / PHYSICS
-            // -------------------------
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb != null)
             {
@@ -1492,75 +1646,6 @@ namespace DV_RoadTraffic
 
             Main.Log("[DVRT] GHOST ENABLED");
         }
-
-        /*
-        void DisableGhostMode()
-        {
-            if (!isGhosted)
-                return;
-
-            isGhosted = false;           
-
-            // -------------------------
-            // VISUAL RESTORE
-            // -------------------------
-            if (!ghostDebug)
-            {
-                // Original behavior
-                foreach (var r in ghostRenderers)
-                {
-                    if (r != null)
-                        r.enabled = true;
-                }
-            }
-            else
-            {
-                // Restore original colors
-                foreach (var r in ghostRenderers)
-                {
-                    if (r == null)
-                        continue;
-
-                    if (!originalColors.ContainsKey(r))
-                        continue;
-
-                    var mats = r.materials;
-                    var cols = originalColors[r];
-
-                    for (int i = 0; i < mats.Length && i < cols.Length; i++)
-                    {
-                        if (mats[i].HasProperty("_Color"))
-                            mats[i].color = cols[i];
-                    }
-                }
-            }
-
-            // -------------------------
-            // COLLISION / PHYSICS
-            // -------------------------
-            
-            RaycastHit hit;
-
-            if (Physics.Raycast(transform.position, Vector3.down, out hit, 0.2f))
-            {
-                // already close to ground, no correction needed
-            }
-            else
-            {
-                transform.position += Vector3.up * 0.05f;
-            }
-
-            Rigidbody rb = GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                rb.detectCollisions = true;
-            }
-
-            StartCoroutine(RestorePhysicsAfterSettle());
-
-            Main.Log("[DVRT] GHOST DISABLED (deferred physics)");
-        }
-        */
 
         void DisableGhostMode()
         {
@@ -1569,31 +1654,16 @@ namespace DV_RoadTraffic
 
             isGhosted = false;
 
-            // -------------------------
-            // VISUAL RESTORE (always)
-            // -------------------------
             foreach (var r in ghostRenderers)
             {
                 if (r != null)
                     r.enabled = true;
             }
 
-            // -------------------------
-            // SMALL POSITION CORRECTION
-            // -------------------------
-            RaycastHit hit;
+            transform.position += Vector3.up * 0.1f;
 
-            if (!Physics.Raycast(transform.position, Vector3.down, out hit, 0.2f))
-            {
-                transform.position += Vector3.up * 0.05f;
-            }
-
-            // 🔑 Ensure physics sees new position immediately
             Physics.SyncTransforms();
 
-            // -------------------------
-            // COLLISION / PHYSICS
-            // -------------------------
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb != null)
             {
@@ -1607,7 +1677,6 @@ namespace DV_RoadTraffic
 
         IEnumerator RestorePhysicsAfterSettle()
         {
-            // Wait one physics frame
             yield return new WaitForFixedUpdate();
 
             Rigidbody rb = GetComponent<Rigidbody>();
@@ -1634,7 +1703,6 @@ namespace DV_RoadTraffic
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb == null) return;
 
-            // Enable full physics
             rb.isKinematic = false;
             rb.useGravity = true;
             rb.constraints = RigidbodyConstraints.None;
@@ -1642,7 +1710,6 @@ namespace DV_RoadTraffic
 
             rb.WakeUp();
 
-            // Reset motion
             rb.velocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
 
@@ -1667,7 +1734,6 @@ namespace DV_RoadTraffic
 
             rb.velocity = launchVelocity;
 
-            // Add tumbling spin
             rb.angularVelocity = Random.insideUnitSphere * 6f;
 
             if (explosive)
@@ -1784,6 +1850,81 @@ namespace DV_RoadTraffic
 
         public static void _______________HELPERS_________________()
         {
+        }
+        public static float GetGameHour()
+        {
+            try
+            {
+                if (_weatherDriver == null)
+                {
+                    var all = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
+
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        var mb = all[i];
+                        if (mb == null)
+                            continue;
+
+                        if (mb.GetType().FullName == "DV.WeatherSystem.WeatherDriver")
+                        {
+                            _weatherDriver = mb;
+
+                            _todProp = mb.GetType().GetProperty("TimeOfDayHours",
+                                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                            if (_todProp != null)
+                            {
+                                var tod = _todProp.GetValue(mb, null);
+                                if (tod != null)
+                                {
+                                    _realProp = tod.GetType().GetProperty("RealValue",
+                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                }
+
+                if (_weatherDriver != null && _todProp != null && _realProp != null)
+                {
+                    var tod = _todProp.GetValue(_weatherDriver, null);
+                    if (tod != null)
+                        return (float)_realProp.GetValue(tod, null);
+                }
+            }
+            catch { }
+
+            return 12f;
+        }
+
+        void IgnoreBetween(TrafficVehicleController a, TrafficVehicleController b)
+        {
+            if (a == null || b == null)
+                return;
+
+            var colsA = a.cachedColliders;
+            var colsB = b.cachedColliders;
+
+            if (colsA == null || colsB == null)
+                return;
+
+            for (int i = 0; i < colsA.Length; i++)
+            {
+                var colA = colsA[i];
+                if (colA == null)
+                    continue;
+
+                for (int j = 0; j < colsB.Length; j++)
+                {
+                    var colB = colsB[j];
+                    if (colB == null)
+                        continue;
+
+                    Physics.IgnoreCollision(colA, colB, true);
+                }
+            }
         }
 
         public void ApplyWorldShift(Vector3 delta)

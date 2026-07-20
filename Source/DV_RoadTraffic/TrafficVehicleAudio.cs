@@ -29,7 +29,7 @@ public class TrafficVehicleAudio : MonoBehaviour
         engineSource.minDistance = 3f;
 
         if (oneshotSource != null)
-            oneshotSource.volume = 1f; // keep neutral
+            oneshotSource.volume = 1f; 
 
         if (engineSource != null)
             engineSource.volume = Main.Settings.engineVolume;
@@ -63,13 +63,11 @@ public class TrafficVehicleAudio : MonoBehaviour
         if (clip == null || oneshotSource == null)
             return;
 
-        //oneshotSource.PlayOneShot(clip);
         oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
     }
 
     public void PlayBrake(AudioClip clip)
     {
-        //oneshotSource.PlayOneShot(clip);
         oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
     }
 }

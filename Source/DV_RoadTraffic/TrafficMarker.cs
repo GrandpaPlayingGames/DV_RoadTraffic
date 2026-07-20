@@ -325,7 +325,6 @@ namespace DV_RoadTraffic
             arrow.transform.localScale = new Vector3(0.2f, 0.2f, 1.2f);
             arrow.transform.localPosition = new Vector3(0f, 0f, 1.1f);
 
-            // 🔥 STORE REFERENCE
             _forwardIndicator = arrow;
         }
 
@@ -415,7 +414,7 @@ namespace DV_RoadTraffic
                 Type = MarkerType.Despawn;
             DVRT_Manager.MarkUnsavedChanges();
             UpdateLabel();
-            UpdateArrowVisibility(); // 🔥 important
+            UpdateArrowVisibility(); 
             DVRT_Manager.ValidateAllMarkerLinks();
         }
 

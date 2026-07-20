@@ -278,9 +278,7 @@ namespace DV_RoadTraffic
             vf.SpawnTrucks = vfData.spawnTrucks;
             vf.SpawnBuses = vfData.spawnBuses;
             vf.SpawnExcavators = vfData.spawnExcavators;
-
-            vf.CacheNearbyBarriers();
-
+            
             Quaternion canonicalRot = Quaternion.Euler(
                 vfData.rotation[0],
                 vfData.rotation[1],

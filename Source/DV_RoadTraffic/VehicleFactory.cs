@@ -1,73 +1,47 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace DV_RoadTraffic
 {
     public class VehicleFactory
     {       
-        // =====================================================
-        // CORE
-        // =====================================================
         public GameObject Root { get; private set; }
 
-
-        // =====================================================
-        // ACTIVATION / SCANNING
-        // =====================================================
         private bool _hasScanned = false;
         private bool _isActivated = false;
 
         public bool IsActivated => _isActivated;
 
-        private const float DiscoveryRadius = 800f;     // tuning
-        private const float ActivationRadius = 1750f;  // player proximity required
+        private const float DiscoveryRadius = 800f;     
+        private const float ActivationRadius = 1750f;  
 
-
-        // =====================================================
-        // ARCHETYPES / LOCAL CACHE
-        // =====================================================
         private List<GameObject> _localArchetypes = new List<GameObject>();
         private HashSet<string> _localTypeNames = new HashSet<string>();
 
-
-        // =====================================================
-        // WORLD / POSITIONING
-        // =====================================================
         private Vector3 _canonicalPosition;
         public Vector3 CanonicalPosition => _canonicalPosition;
 
         private Quaternion _canonicalRotation;
 
 
-        // =====================================================
-        // VISUALS / MATERIAL
-        // =====================================================
         private Material _material;
 
         private Color _idleColor = Color.white;
         private Color _groupColor = Color.yellow;
 
-
-        // =====================================================
-        // EDITOR / SELECTION
-        // =====================================================
         public bool IsSelected { get; private set; }
 
         private int _editParameterIndex = 0;
 
-
-        // =====================================================
-        // SPAWN FILTERS
-        // =====================================================
         public bool SpawnCars = true;
         public bool SpawnTrucks = true;
         public bool SpawnBuses = true;
         public bool SpawnExcavators = true;
 
-
-        // =====================================================
-        // ROUTE / MARKERS
-        // =====================================================
         public List<TrafficMarker> Markers = new List<TrafficMarker>();
 
         private string _routeName = "Route";
@@ -84,10 +58,9 @@ namespace DV_RoadTraffic
             }
         }
 
+        public readonly List<TrafficVehicleController> ActiveVehicles =
+            new List<TrafficVehicleController>();
 
-        // =====================================================
-        // TRAFFIC SETTINGS
-        // =====================================================
         private int _trafficRate = 5;
 
         public int TrafficRate
@@ -101,26 +74,48 @@ namespace DV_RoadTraffic
             }
         }
 
-        public float TTL = 240f; // default
+        public float TTL = 240f; 
 
         private float _nextSpawnTime = -1f;
 
-
-        // =====================================================
-        // BARRIERS
-        // =====================================================
         public readonly List<Transform> NearbyBarriers = new List<Transform>();
 
+        private static bool _dvlcDatabaseReflectionResolved;
+        private static bool _dvlcDatabaseReflectionAvailable;
 
-        // =====================================================
-        // UI / LABEL
-        // =====================================================
+        private static FieldInfo _dvlcLoadedDatabaseField;
+ 
+        private static readonly List<DVLCCanonicalBarrier>
+            _dvlcCanonicalBarriers =
+                new List<DVLCCanonicalBarrier>();
+
+        private static object _dvlcCachedDatabaseInstance;
+        private static bool _dvlcCanonicalBarrierDataAvailable;
+
+        private static float _nextDVLCDatabaseRetryTime;
+
+        private const float DVLCDatabaseRetryInterval = 0.5f;
+
+        private sealed class DVLCCanonicalBarrier
+        {
+            public string Path;
+            public Vector3 CanonicalPosition;
+        }
+
+        private bool _barrierRefreshPending;
+        private int _barrierRefreshAttempts;
+        private float _nextBarrierRefreshAttemptTime;
+
+        private bool _backgroundBarrierRefreshActive;
+        private float _nextBackgroundBarrierRefreshTime;
+
+        private const float BackgroundBarrierRefreshInterval = 2f;
+
+        private const int MaxBarrierRefreshAttempts = 4;
+        private const float BarrierRefreshRetryInterval = 0.5f;
+
         private TextMesh _label;
 
-
-        // =====================================================
-        // SPAWN TIMING
-        // =====================================================
         private float GetSpawnDelay()
         {
             if (_trafficRate <= 0)
@@ -143,14 +138,12 @@ namespace DV_RoadTraffic
 
         public void Destroy()
         {
-            // unsubscribe from world shift events
             if (_wosSubscribed)
             {
                 DVRT_WorldShiftManager.OnWorldShift -= HandleWorldShift;
                 _wosSubscribed = false;
             }
 
-            // destroy markers belonging to this factory
             foreach (var marker in Markers)
             {
                 if (marker != null)
@@ -160,8 +153,8 @@ namespace DV_RoadTraffic
                 }
             }
             Markers.Clear();
+            ActiveVehicles.Clear();
 
-            // destroy the root object
             if (Root != null)
                 GameObject.Destroy(Root);
         }
@@ -172,7 +165,6 @@ namespace DV_RoadTraffic
 
         public VehicleFactory(Vector3 worldPosition)
         {
-            // worldPosition is already a SESSION position (raycast hit)
             Root = GameObject.CreatePrimitive(PrimitiveType.Cube);
             Root.name = "DVRT_VehicleFactory";
 
@@ -209,7 +201,7 @@ namespace DV_RoadTraffic
             arrow.name = "ForwardIndicator";
             arrow.transform.SetParent(Root.transform, false);
 
-            Object.Destroy(arrow.GetComponent<Collider>());
+            UnityEngine.Object.Destroy(arrow.GetComponent<Collider>());
             arrow.GetComponent<Renderer>().material.color = Color.green;
 
             Vector3 parentScale = Root.transform.localScale;
@@ -235,71 +227,6 @@ namespace DV_RoadTraffic
             );
 
             arrow.transform.localRotation = Quaternion.identity;
-        }
-
-        public void CacheNearbyBarriers()
-        {
-            if (!IsPlayerWithinActivationRange())
-                return;
-
-            NearbyBarriers.Clear();
-
-            const float radius = 1000f;
-            float radiusSq = radius * radius;
-
-            Main.Log("******************************** [SCAN] **********************************");
-            Main.Log($"[SCAN] Factory origin: {Root.transform.position}");
-
-            var all = UnityEngine.Object.FindObjectsOfType<Transform>();
-            Main.Log($"[SCAN] Found {all.Length} transforms in scene");
-
-            foreach (var t in all)
-            {
-                if (t == null)
-                    continue;
-
-                // only interested in barrier roots
-                if (!t.name.StartsWith("RailwayCrossingBarrierShort") &&
-                    !t.name.StartsWith("RailwayCrossingBarrierLong"))
-                    continue;
-
-                Main.Log($"[SCAN] Candidate root found: {t.name} | rootPos={t.position}");
-
-                if ((t.position - Root.transform.position).sqrMagnitude > radiusSq)
-                {
-                    Main.Log($"[SCAN] Rejected (out of range | rootPos={t.position})");
-                    continue;
-                }
-
-                Main.Log($"[SCAN] Root is within range | rootPos={t.position}");
-
-                var ramp = t.Find("Ramp");
-
-                Transform collider = null;
-
-                if (ramp != null)
-                {
-                    var coliders = ramp.Find("Coliders") ?? ramp.Find("Colliders");
-
-                    if (coliders != null && coliders.childCount > 0)
-                        collider = coliders.GetChild(0);
-                }
-
-                if (collider == null)
-                {
-                    Main.Log($"[SCAN] Collider path NOT found | rootPos={t.position}");
-                    DumpBarrierChildren(t);
-                    continue;
-                }
-
-                Main.Log($"[SCAN] Found Ramp/Colliders/Collider | rootPos={t.position}");
-
-                NearbyBarriers.Add(collider);
-
-                Main.Log($"[SCAN] Added barrier collider | rootPos={t.position} | colliderPos={collider.position}");
-            }
-
-            Main.Log($"[SCAN] Barrier scan complete | cached: {NearbyBarriers.Count}");
         }
 
         void DumpBarrierChildren(Transform root)
@@ -504,7 +431,6 @@ namespace DV_RoadTraffic
                 if (go == null)
                     continue;
 
-                // Must belong to a loaded scene
                 if (!go.scene.IsValid() || !go.scene.isLoaded)
                     continue;
 
@@ -512,7 +438,6 @@ namespace DV_RoadTraffic
                 if (root == null)
                     continue;
 
-                // Distance filter
                 float dist = Vector3.Distance(
                     root.position,
                     Root.transform.position
@@ -570,7 +495,6 @@ namespace DV_RoadTraffic
                 if (cleanName.Contains("Wreck") ||
                     cleanName.Contains("_dmg") ||
                     cleanName.Contains("Trailer") ||
-                    //cleanName.Contains("TruckSemi80s_01_Green") ||
                     cleanName.Contains("Station") ||
                     cleanName.Contains("TruckMedium90sTrailer_01_Orange") ||
                     cleanName.Contains("MiningTruckWheelOld") ||
@@ -619,22 +543,18 @@ namespace DV_RoadTraffic
             if (_localArchetypes.Count == 0)
             {
                 CacheLocalTrafficArchetypes();
-                CacheNearbyBarriers();
             }
 
             if (_localArchetypes.Count == 0)
                 return null;
 
-            int index = Random.Range(0, _localArchetypes.Count);
+            int index = UnityEngine.Random.Range(0, _localArchetypes.Count);
             return _localArchetypes[index];
         }
 
-        public void TryAutoSpawn()
+        public void TryAutoSpawn(Vector3 playerPosition)
         {
             if (Root == null)
-                return;
-
-            if (!IsPlayerNearEnough())   // 👈 ADD THIS
                 return;
 
             if (!_isActivated)
@@ -643,22 +563,36 @@ namespace DV_RoadTraffic
             if (_trafficRate <= 0)
                 return;
 
+            UpdateDVLCCanonicalDatabaseCache();
+
+            UpdateBackgroundBarrierRefresh();
+
+            if (ShouldHoldSpawnForBarrierRefresh())
+            {
+                return;
+            }
+
             if (_nextSpawnTime < 0f)
-                _nextSpawnTime = Time.time + GetSpawnDelay();
+            {
+                _nextSpawnTime =
+                    Time.time + GetSpawnDelay();
+            }
 
             if (Time.time < _nextSpawnTime)
-                return;            
+                return;
 
-            bool success = DVRT_Manager.SpawnFromFactory(this);
+            bool success =
+                DVRT_Manager.SpawnFromFactory(this);
 
             if (success)
             {
-                _nextSpawnTime = Time.time + GetSpawnDelay();
+                _nextSpawnTime =
+                    Time.time + GetSpawnDelay();
             }
             else
             {
-                // retry soon
-                _nextSpawnTime = Time.time + 1f;
+                _nextSpawnTime =
+                    Time.time + 1f;
             }
         }
 
@@ -707,7 +641,7 @@ namespace DV_RoadTraffic
             _label.text =
                 $"{RouteName}\n" +
                 $"{p0}Traffic: {TrafficRate}\n" +
-                $"{p1}TTL: {TTL:0}s\n\n" +   // 👈 ADD THIS
+                $"{p1}TTL: {TTL:0}s\n\n" +   
                 $"{p2}Spawn Cars: {(SpawnCars ? "Y" : "N")}\n" +
                 $"{p3}Spawn Trucks: {(SpawnTrucks ? "Y" : "N")}\n" +
                 $"{p4}Spawn Buses: {(SpawnBuses ? "Y" : "N")}\n" +
@@ -761,19 +695,674 @@ namespace DV_RoadTraffic
             return Root.transform.rotation;
         }
 
+
         private void HandleWorldShift(Vector3 delta)
         {
             ApplyTransform();
         }
 
+        public static void ___________NEW_DVLC_STUFF________________()
+        {
+        }
+
+        public void CacheNearbyBarriers()
+        {
+            if (!IsPlayerWithinActivationRange())
+                return;
+
+            CacheNearbyBarriersFromDVLC();
+        }             
+
+        private static void ResolveDVLCDatabaseReflection()
+        {
+            if (_dvlcDatabaseReflectionResolved)
+                return;
+
+            _dvlcDatabaseReflectionResolved = true;
+            _dvlcDatabaseReflectionAvailable = false;
+
+            Type dvlcMainType = null;
+
+            Assembly[] assemblies =
+                AppDomain.CurrentDomain.GetAssemblies();
+
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Assembly assembly = assemblies[i];
+
+                if (assembly == null)
+                    continue;
+
+                dvlcMainType =
+                    assembly.GetType(
+                        "DV_LevelCrossings.Main",
+                        false);
+
+                if (dvlcMainType != null)
+                    break;
+            }
+
+            if (dvlcMainType == null)
+            {
+                Main.Log(
+                    "[DVRT] DVLC canonical database unavailable: " +
+                    "DV_LevelCrossings.Main type not found.");
+
+                return;
+            }
+
+            _dvlcLoadedDatabaseField =
+                dvlcMainType.GetField(
+                    "_loadedDatabase",
+                    BindingFlags.Public |
+                    BindingFlags.Static);
+
+            if (_dvlcLoadedDatabaseField == null)
+            {
+                Main.Log(
+                    "[DVRT] DVLC canonical database unavailable: " +
+                    "_loadedDatabase field not found.");
+
+                return;
+            }
+
+            _dvlcDatabaseReflectionAvailable = true;
+
+            Main.Log(
+                "[DVRT] DVLC canonical database reflection resolved.");
+        }
+
+        private static bool TryCacheDVLCCanonicalBarrierData()
+        {            
+            ResolveDVLCDatabaseReflection();
+
+            if (!_dvlcDatabaseReflectionAvailable)
+                return false;
+
+            object database =
+                _dvlcLoadedDatabaseField.GetValue(null);
+
+            if (database == null)
+                return false;
+
+            if (_dvlcCanonicalBarrierDataAvailable &&
+                ReferenceEquals(
+                    database,
+                    _dvlcCachedDatabaseInstance))
+            {
+                return true;
+            }
+
+            Type databaseType =
+                database.GetType();
+
+            FieldInfo crossingsField =
+                databaseType.GetField(
+                    "crossings",
+                    BindingFlags.Public |
+                    BindingFlags.Instance);
+
+            if (crossingsField == null)
+            {
+                Main.Log(
+                    "[DVRT] DVLC canonical database invalid: " +
+                    "crossings field not found.");
+
+                return false;
+            }
+
+            IEnumerable crossings =
+                crossingsField.GetValue(database)
+                as IEnumerable;
+
+            if (crossings == null)
+            {
+                Main.Log(
+                    "[DVRT] DVLC canonical database invalid: " +
+                    "crossings collection unavailable.");
+
+                return false;
+            }
+
+            _dvlcCanonicalBarriers.Clear();
+
+            int crossingCount = 0;
+            int barrierCount = 0;
+
+            foreach (object crossing in crossings)
+            {
+                if (crossing == null)
+                    continue;
+
+                crossingCount++;
+
+                Type crossingType =
+                    crossing.GetType();
+
+                FieldInfo barriersField =
+                    crossingType.GetField(
+                        "barriers",
+                        BindingFlags.Public |
+                        BindingFlags.Instance);
+
+                if (barriersField == null)
+                    continue;
+
+                IEnumerable barriers =
+                    barriersField.GetValue(crossing)
+                    as IEnumerable;
+
+                if (barriers == null)
+                    continue;
+
+                foreach (object barrier in barriers)
+                {
+                    if (barrier == null)
+                        continue;
+
+                    Type barrierType =
+                        barrier.GetType();
+
+                    FieldInfo pathField =
+                        barrierType.GetField(
+                            "path",
+                            BindingFlags.Public |
+                            BindingFlags.Instance);
+
+                    FieldInfo posXField =
+                        barrierType.GetField(
+                            "posX",
+                            BindingFlags.Public |
+                            BindingFlags.Instance);
+
+                    FieldInfo posYField =
+                        barrierType.GetField(
+                            "posY",
+                            BindingFlags.Public |
+                            BindingFlags.Instance);
+
+                    FieldInfo posZField =
+                        barrierType.GetField(
+                            "posZ",
+                            BindingFlags.Public |
+                            BindingFlags.Instance);
+   
+                    if (pathField == null ||
+                        posXField == null ||
+                        posYField == null ||
+                        posZField == null)
+                    {
+                        continue;
+                    }
+
+                    float posX =
+                        Convert.ToSingle(
+                            posXField.GetValue(barrier));
+
+                    float posY =
+                        Convert.ToSingle(
+                            posYField.GetValue(barrier));
+
+                    float posZ =
+                        Convert.ToSingle(
+                            posZField.GetValue(barrier));
+ 
+                    string path =
+                        pathField.GetValue(barrier) as string;
+
+                    if (string.IsNullOrEmpty(path))
+                        continue;
+
+                    DVLCCanonicalBarrier record =
+                        new DVLCCanonicalBarrier
+                        {
+                            Path = path,
+
+                            CanonicalPosition =
+                                new Vector3(
+                                    posX,
+                                    posY,
+                                    posZ)
+                        };
+
+                    _dvlcCanonicalBarriers.Add(record);
+
+                    barrierCount++;
+
+                }
+            }
+
+            _dvlcCachedDatabaseInstance = database;
+            _dvlcCanonicalBarrierDataAvailable = true;
+
+            Main.Log(
+                 $"[DVRT] DVLC canonical barrier database available | " +
+                 $"Crossings={crossingCount} | " +
+                 $"Barriers={barrierCount} | " +
+                 $"CachedRecords={_dvlcCanonicalBarriers.Count}");
+
+            return true;
+        }
+
+        private static void UpdateDVLCCanonicalDatabaseCache()
+        {
+            if (_dvlcCanonicalBarrierDataAvailable)
+                return;
+
+            if (Time.time < _nextDVLCDatabaseRetryTime)
+                return;
+
+            _nextDVLCDatabaseRetryTime =
+                Time.time + DVLCDatabaseRetryInterval;
+
+            TryCacheDVLCCanonicalBarrierData();
+        }
+
+        private static Transform FindLiveBarrierByCanonicalPath(
+    DVLCCanonicalBarrier record,
+    List<GameObject> loadedSceneRoots)
+        {
+            if (record == null)
+                return null;
+
+            if (string.IsNullOrEmpty(record.Path))
+                return null;
+
+            if (loadedSceneRoots == null ||
+                loadedSceneRoots.Count == 0)
+            {
+                return null;
+            }
+
+            string[] parts =
+                record.Path.Split('/');
+
+            if (parts.Length == 0)
+                return null;
+
+            Vector3 expectedWorldPosition =
+                record.CanonicalPosition +
+                WorldMover.currentMove;
+
+            for (int i = 0; i < loadedSceneRoots.Count; i++)
+            {
+                GameObject rootObject =
+                    loadedSceneRoots[i];
+
+                if (rootObject == null)
+                    continue;
+
+                Transform root =
+                    rootObject.transform;
+
+                if (root == null)
+                    continue;
+
+                if (root.name != parts[0])
+                    continue;
+
+                Transform match =
+                    FindCanonicalPathMatch(
+                        root,
+                        parts,
+                        1,
+                        expectedWorldPosition);
+
+                if (match != null)
+                    return match;
+            }
+
+            return null;
+        }
+
+        private static Transform FindCanonicalPathMatch(
+    Transform current,
+    string[] parts,
+    int index,
+    Vector3 expectedWorldPosition)
+        {
+            if (current == null)
+                return null;
+
+            if (parts == null ||
+                parts.Length == 0)
+            {
+                return null;
+            }
+
+            if (index >= parts.Length)
+            {
+                float positionDifferenceSq =
+                    (current.position -
+                     expectedWorldPosition)
+                    .sqrMagnitude;
+
+                if (positionDifferenceSq < 0.01f)
+                    return current;
+
+                return null;
+            }
+
+            string requiredName =
+                parts[index];
+
+            int childCount =
+                current.childCount;
+
+            for (int i = 0; i < childCount; i++)
+            {
+                Transform child =
+                    current.GetChild(i);
+
+                if (child == null)
+                    continue;
+
+                if (child.name != requiredName)
+                    continue;
+
+                Transform result =
+                    FindCanonicalPathMatch(
+                        child,
+                        parts,
+                        index + 1,
+                        expectedWorldPosition);
+
+                if (result != null)
+                    return result;
+            }
+
+            return null;
+        }
+
+        private static List<GameObject> GetLoadedSceneRoots()
+        {
+            List<GameObject> roots =
+                new List<GameObject>();
+
+            int sceneCount =
+                SceneManager.sceneCount;
+
+            for (int i = 0; i < sceneCount; i++)
+            {
+                Scene scene =
+                    SceneManager.GetSceneAt(i);
+
+                if (!scene.IsValid())
+                    continue;
+
+                if (!scene.isLoaded)
+                    continue;
+
+                GameObject[] sceneRoots =
+                    scene.GetRootGameObjects();
+
+                if (sceneRoots == null)
+                    continue;
+
+                for (int r = 0; r < sceneRoots.Length; r++)
+                {
+                    GameObject root =
+                        sceneRoots[r];
+
+                    if (root != null)
+                        roots.Add(root);
+                }
+            }
+
+            return roots;
+        }
+
+        private bool CacheNearbyBarriersFromDVLC()
+        {
+            NearbyBarriers.Clear();
+
+            if (Root == null)
+                return true;
+
+            bool databaseAvailable =
+                TryCacheDVLCCanonicalBarrierData();
+
+            if (!databaseAvailable)
+                return false;
+
+            const float radius = 1000f;
+            float radiusSq =
+                radius * radius;
+
+            Vector3 factoryCanonicalPosition =
+                Root.transform.position -
+                WorldMover.currentMove;
+
+            List<GameObject> loadedSceneRoots =
+                GetLoadedSceneRoots();
+
+            int nearbyDatabaseRecords = 0;
+            int resolvedBarrierRoots = 0;
+            int unresolvedBarrierRoots = 0;
+
+            for (int i = 0;
+                 i < _dvlcCanonicalBarriers.Count;
+                 i++)
+            {
+                DVLCCanonicalBarrier record =
+                    _dvlcCanonicalBarriers[i];
+
+                if (record == null)
+                    continue;
+
+                float canonicalDistanceSq =
+                    (record.CanonicalPosition -
+                     factoryCanonicalPosition)
+                    .sqrMagnitude;
+
+                if (canonicalDistanceSq > radiusSq)
+                    continue;
+
+                nearbyDatabaseRecords++;
+
+                Transform barrierRoot =
+                    FindLiveBarrierByCanonicalPath(
+                        record,
+                        loadedSceneRoots);
+
+                if (barrierRoot == null)
+                {
+                    unresolvedBarrierRoots++;
+                    continue;
+                }
+
+                resolvedBarrierRoots++;
+
+                Transform ramp =
+                    barrierRoot.Find("Ramp");
+
+                if (ramp == null)
+                    continue;
+
+                Transform colliders =
+                    ramp.Find("Coliders") ??
+                    ramp.Find("Colliders");
+
+                if (colliders == null ||
+                    colliders.childCount == 0)
+                {
+                    continue;
+                }
+
+                Transform collider =
+                    colliders.GetChild(0);
+
+                if (collider == null)
+                    continue;
+
+                if (!NearbyBarriers.Contains(collider))
+                {
+                    NearbyBarriers.Add(collider);
+                }
+            }
+
+            Main.Log(
+                $"[DVRT] Canonical DVLC barrier refresh | " +
+                $"Route={RouteName} | " +
+                $"NearbyRecords={nearbyDatabaseRecords} | " +
+                $"ResolvedRoots={resolvedBarrierRoots} | " +
+                $"UnresolvedRoots={unresolvedBarrierRoots} | " +
+                $"Cached={NearbyBarriers.Count}");
+
+            return true;
+        }
+
+        private void BeginBarrierRefreshAfterActivation()
+        {
+            TryCacheDVLCCanonicalBarrierData();
+
+            _barrierRefreshPending = true;
+            _barrierRefreshAttempts = 0;
+            _nextBarrierRefreshAttemptTime = Time.time;
+
+            _backgroundBarrierRefreshActive = false;
+            _nextBackgroundBarrierRefreshTime = -1f;
+        }
+
+        public void RequestBarrierRefresh()
+        {
+            NearbyBarriers.Clear();
+
+            _barrierRefreshPending = true;
+            _barrierRefreshAttempts = 0;
+            _nextBarrierRefreshAttemptTime =
+                Time.time + 0.5f;
+
+            _backgroundBarrierRefreshActive = false;
+            _nextBackgroundBarrierRefreshTime = -1f;
+
+            Main.Log(
+                $"[DVRT] Barrier refresh requested | Route={RouteName}");
+        }
+
+        private bool ShouldHoldSpawnForBarrierRefresh()
+        {
+            if (!_barrierRefreshPending)
+                return false;
+
+            if (Time.time < _nextBarrierRefreshAttemptTime)
+                return true;
+
+            _barrierRefreshAttempts++;
+
+            bool integrationAvailable =
+                CacheNearbyBarriersFromDVLC();
+
+            if (!integrationAvailable)
+            {
+                _barrierRefreshPending = false;
+                _backgroundBarrierRefreshActive = false;
+                return false;
+            }
+
+            if (NearbyBarriers.Count > 0)
+            {
+                _barrierRefreshPending = false;
+                _backgroundBarrierRefreshActive = false;
+
+                Main.Log(
+                    $"[DVRT] Barrier refresh ready before spawn | " +
+                    $"Route={RouteName} | " +
+                    $"Attempts={_barrierRefreshAttempts} | " +
+                    $"Cached={NearbyBarriers.Count}");
+
+                return false;
+            }
+
+            if (_barrierRefreshAttempts < MaxBarrierRefreshAttempts)
+            {
+                _nextBarrierRefreshAttemptTime =
+                    Time.time + BarrierRefreshRetryInterval;
+
+                return true;
+            }
+
+            _barrierRefreshPending = false;
+            _backgroundBarrierRefreshActive = true;
+            _nextBackgroundBarrierRefreshTime =
+                Time.time + BackgroundBarrierRefreshInterval;
+
+            Main.Log(
+                $"[DVRT] Barrier refresh retry limit reached | " +
+                $"Route={RouteName} | Cached=0 | " +
+                $"Starting background refresh");
+
+            return false;
+        }
+
+        private void UpdateBackgroundBarrierRefresh()
+        {
+            if (!_backgroundBarrierRefreshActive)
+                return;
+
+            if (!_isActivated)
+                return;
+
+            if (NearbyBarriers.Count > 0)
+            {
+                _backgroundBarrierRefreshActive = false;
+                return;
+            }
+
+            if (Time.time < _nextBackgroundBarrierRefreshTime)
+                return;
+
+            _nextBackgroundBarrierRefreshTime =
+                Time.time + BackgroundBarrierRefreshInterval;
+
+            bool integrationAvailable =
+                CacheNearbyBarriersFromDVLC();
+
+            if (!integrationAvailable)
+            {
+                _backgroundBarrierRefreshActive = false;
+                return;
+            }
+
+            if (NearbyBarriers.Count > 0)
+            {
+                _backgroundBarrierRefreshActive = false;
+
+                Main.Log(
+                    $"[DVRT] Background barrier refresh succeeded | " +
+                    $"Route={RouteName} | " +
+                    $"Cached={NearbyBarriers.Count}");
+            }
+        }
+
+
         public static void ___________OTHER_HELPERS________________()
         {
-        }                              
+        }
 
+
+        bool IsDVLevelCrossingBarrier(Transform barrierRoot)
+        {
+            if (barrierRoot == null)
+                return false;
+
+            var signal = barrierRoot.Find("RailwayCrossingSignal");
+            if (signal == null)
+                return false;
+
+            return signal.GetComponent<AudioSource>() != null;
+        }
         private bool IsPlayerNearEnough()
         {
             Transform cam = Camera.main?.transform;
             if (cam == null)
+                return false;
+
+            if (Root == null)
+                return false;
+
+            var rootTransform = Root.transform;
+            if (rootTransform == null)
                 return false;
 
             float dist = Vector3.Distance(
@@ -793,22 +1382,41 @@ namespace DV_RoadTraffic
             return dist <= ActivationRadius;
         }
 
-        public void UpdateActivation()
+        public void UpdateActivation(Vector3 playerPosition)
         {
-            bool inRange = IsPlayerNearEnough();
+            if (Root == null)
+                return;
+
+            Vector3 offset =
+                playerPosition - Root.transform.position;
+
+            bool inRange =
+                offset.sqrMagnitude <=
+                ActivationRadius * ActivationRadius;
 
             if (inRange && !_isActivated)
             {
                 _isActivated = true;
 
-                // force immediate spawn
+                BeginBarrierRefreshAfterActivation();
+
                 _nextSpawnTime = Time.time;
 
-                Main.Log($"[DVRT] VF activated at {Root.transform.position}");
+                Main.Log(
+                    $"[DVRT] VF activated at {Root.transform.position}");
             }
             else if (!inRange && _isActivated)
             {
                 _isActivated = false;
+
+                _barrierRefreshPending = false;
+                _barrierRefreshAttempts = 0;
+                _nextBarrierRefreshAttemptTime = -1f;
+
+                _backgroundBarrierRefreshActive = false;
+                _nextBackgroundBarrierRefreshTime = -1f;
+
+                NearbyBarriers.Clear();
             }
         }
 

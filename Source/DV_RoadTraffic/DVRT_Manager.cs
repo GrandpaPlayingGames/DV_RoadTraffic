@@ -27,6 +27,13 @@ namespace DV_RoadTraffic
         public static List<TrafficVehicleController> ActiveVehicles =
             new List<TrafficVehicleController>();
 
+        // ==============================
+        // FACTORY ACTIVATION
+        // ==============================
+
+        private static float _nextFactoryActivationCheckTime;
+        private const float FACTORY_ACTIVATION_CHECK_INTERVAL = 0.25f;
+
 
         // ==============================
         // SELECTION STATE
@@ -47,6 +54,8 @@ namespace DV_RoadTraffic
         private static string _routeNameBuffer = "";
 
         public static bool IsTypingRouteName => _editingRouteName;
+
+        private static bool _releaseGameplayInputAfterEscape;
         private static bool _skipTypingFrame;
 
 
@@ -83,7 +92,10 @@ namespace DV_RoadTraffic
         // ==============================
 
         private static bool _unsavedChanges = false;
+        private static bool _lastAutoHeadlightsState = false;
 
+        private static float _nextHeadlightUpdateTime;
+        private const float HEADLIGHT_UPDATE_INTERVAL = 1f;
 
         // ==============================
         // AUTO SPAWN
@@ -110,7 +122,8 @@ namespace DV_RoadTraffic
 
         public static void Update(float dt)
         {
-             if (!_layerCheckDone)
+
+            if (!_layerCheckDone)
             {
                 bool ignored = Physics.GetIgnoreLayerCollision(0, 0);
                 Main.Log($"[DVRT] IgnoreLayerCollision(0,0) = {ignored}");
@@ -118,15 +131,41 @@ namespace DV_RoadTraffic
             }
 
             if (!_globalEditingMode)
-            {                
-                foreach (var vf in _factories)
-                {
-                    vf.UpdateActivation();
+            {
+                Transform playerTransform = Camera.main?.transform;
 
-                    //if (vf.TrafficRate > 0)
-                    if (vf.TrafficRate > 0 && vf.IsActivated)
-                        vf.TryAutoSpawn();
-                }              
+                if (playerTransform != null)
+                {
+                    float now = Time.time;
+                    Vector3 playerPosition = playerTransform.position;
+
+                    if (now >= _nextFactoryActivationCheckTime)
+                    {
+                        _nextFactoryActivationCheckTime =
+                            now + FACTORY_ACTIVATION_CHECK_INTERVAL;
+
+                        for (int i = 0; i < _factories.Count; i++)
+                        {
+                            VehicleFactory vf = _factories[i];
+
+                            if (vf == null)
+                                continue;
+
+                            vf.UpdateActivation(playerPosition);
+                        }
+                    }
+
+                    for (int i = 0; i < _factories.Count; i++)
+                    {
+                        VehicleFactory vf = _factories[i];
+
+                        if (vf == null)
+                            continue;
+
+                        if (vf.TrafficRate > 0 && vf.IsActivated)
+                            vf.TryAutoSpawn(playerPosition);
+                    }
+                }
             }
 
             DVRT_WorldShiftManager.Update();
@@ -142,6 +181,60 @@ namespace DV_RoadTraffic
             HandleMarkerType();
             HandleMovementInput(dt);
 
+            bool currentSetting = Main.Settings.enableAutoHeadlights;
+            float headlightNow = Time.time;
+
+            if (currentSetting != _lastAutoHeadlightsState)
+            {
+                Main.Log($"[DVRT] Auto headlights toggled → {currentSetting}");
+
+                if (currentSetting)
+                {
+                    float hour = TrafficVehicleController.GetGameHour();
+
+                    for (int i = 0; i < ActiveVehicles.Count; i++)
+                    {
+                        TrafficVehicleController vehicle = ActiveVehicles[i];
+
+                        if (vehicle != null)
+                            vehicle.UpdateHeadlights(hour);
+                    }
+
+                    _nextHeadlightUpdateTime =
+                        headlightNow + HEADLIGHT_UPDATE_INTERVAL;
+                }
+                else
+                {
+                    for (int i = 0; i < ActiveVehicles.Count; i++)
+                    {
+                        TrafficVehicleController vehicle = ActiveVehicles[i];
+
+                        if (vehicle != null)
+                            vehicle.SetHeadlights(false);
+                    }
+                }
+
+                _lastAutoHeadlightsState = currentSetting;
+            }
+
+            if (currentSetting &&
+                headlightNow >= _nextHeadlightUpdateTime)
+            {
+                _nextHeadlightUpdateTime =
+                    headlightNow + HEADLIGHT_UPDATE_INTERVAL;
+
+                float hour = TrafficVehicleController.GetGameHour();
+
+                for (int i = 0; i < ActiveVehicles.Count; i++)
+                {
+                    TrafficVehicleController vehicle = ActiveVehicles[i];
+
+                    if (vehicle != null)
+                        vehicle.UpdateHeadlights(hour);
+                }
+            }
+
+
             if (Main.Settings.AutoSpawnTestVehicle.IsPressed())
             {
                 if (!_globalEditingMode)
@@ -156,17 +249,14 @@ namespace DV_RoadTraffic
                 Main.Log($"[DVRT] AutoSpawn {(autoSpawnEnabled ? "ENABLED" : "DISABLED")}");
             }
 
-            // --- Manual spawn (F8) ---
             if (Main.Settings.SpawnTestVehicle.IsPressed())
             {
                 if (_selectedGroup != null && _globalEditingMode)
                     SpawnFromFactory(_selectedGroup);
             }
 
-            // --- Auto spawn loop ---
             if (autoSpawnEnabled)
             {
-                // stop if we leave edit mode
                 if (!_globalEditingMode)
                 {
                     autoSpawnEnabled = false;
@@ -174,7 +264,6 @@ namespace DV_RoadTraffic
                     return;
                 }
 
-                // 🔥 NEW: stop if route deselected
                 if (_selectedGroup == null)
                 {
                     autoSpawnEnabled = false;
@@ -191,38 +280,64 @@ namespace DV_RoadTraffic
                 }
             }
 
-            if (Main.Settings.SaveRoutes.IsPressed())
+            if (_globalEditingMode)
             {
-                if (_editingMode)
+
+                if (Main.Settings.SaveRoutes.IsPressed())
                 {
-                    DVRT_RoutePersistence.SaveRoutes(_factories);
-                    _unsavedChanges = false;
+                    if (_editingMode)
+                    {
+                        DVRT_RoutePersistence.SaveRoutes(_factories);
+                        _unsavedChanges = false;
+                    }
                 }
+
+                if (_releaseGameplayInputAfterEscape &&
+                    !Input.GetKey(KeyCode.Escape))
+                {
+                    _releaseGameplayInputAfterEscape = false;
+                    BlockGameplayInput(false);
+                }
+
+                if (_editingRouteName && Input.GetKeyDown(KeyCode.Escape))
+                {
+                    BlockGameplayInput(false);
+                    _editingRouteName = false;
+
+                    Main.Log("[DVRT] Route naming cancelled.");
+                    return;
+                }
+
+                for (int i = 0; i < _factories.Count; i++)
+                {
+                    VehicleFactory vf = _factories[i];
+
+                    if (vf == null)
+                        continue;
+
+                    vf.Update();
+
+                    List<TrafficMarker> markers = vf.Markers;
+
+                    if (markers == null)
+                        continue;
+
+                    for (int j = 0; j < markers.Count; j++)
+                    {
+                        TrafficMarker marker = markers[j];
+
+                        if (marker != null)
+                            marker.Update();
+                    }
+                }
+
+                DrawRoutePreview();
             }
-
-
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                BlockGameplayInput(false);
-                _editingRouteName = false;
-
-                Main.Log("[DVRT] Route naming cancelled.");
-                return;
-            }
-
-            foreach (var vf in _factories)
-            {
-                vf.Update();
-
-                foreach (var marker in vf.Markers)
-                    marker.Update();
-            }
-
-            DrawRoutePreview();
         }
 
         public static void ApplyVehicleLayerChange(int newLayer)
         {
+            return;
             Main.Log($"[DVRT] Applying vehicle layer: {newLayer}");
             
             for (int i = 0; i < 32; i++)
@@ -254,10 +369,6 @@ namespace DV_RoadTraffic
         public static void _______________INPUTS_________________()
         {
         }
-
-        // ========================================================
-        // F9 ACTION
-        // ========================================================
   
         private static void HandleF9Action()
         {
@@ -272,10 +383,6 @@ namespace DV_RoadTraffic
 
             RaycastHit hit;
             bool hitSomething = RaycastFromCamera(out hit);
-
-            // ----------------------------------------------------
-            // NOT EDITING
-            // ----------------------------------------------------
 
             if (!_editingMode)
             {
@@ -295,13 +402,8 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // ----------------------------------------------------
-            // EDITING MODE
-            // ----------------------------------------------------
-
             if (hitSomething)
             {
-                // first check markers
                 TrafficMarker marker = GetMarkerFromHit(hit);
 
                 if (marker != null)
@@ -366,10 +468,6 @@ namespace DV_RoadTraffic
             }
         }
 
-        // ========================================================
-        // MOVEMENT / ROTATION
-        // ========================================================
-        
         private static void HandleMovementInput(float dt)
         {
             if (!_globalEditingMode)
@@ -439,9 +537,6 @@ namespace DV_RoadTraffic
                 bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
                 bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
-                // ------------------------------------
-                // ROTATION (NO ALT)
-                // ------------------------------------
                 if (!alt)
                 {
                     float rotateStep = 20f;
@@ -465,9 +560,6 @@ namespace DV_RoadTraffic
                     return;
                 }
 
-                // ------------------------------------
-                // ALT + SCROLL : VEHICLE FACTORY PARAMETERS
-                // ------------------------------------
                 if (_selectedGroup != null && _selectedMarker == null)
                 {
                     if (shift)
@@ -482,9 +574,6 @@ namespace DV_RoadTraffic
                     return;
                 }
 
-                // ------------------------------------
-                // ALT + SCROLL : PARAMETER EDITING
-                // ------------------------------------
                 if (_selectedMarker != null)
                 {
                     if (_selectedMarker.Type == TrafficMarker.MarkerType.TurnTo)
@@ -592,7 +681,6 @@ namespace DV_RoadTraffic
             if (!_editingMode || _selectedGroup == null)
                 return;
 
-            // delete marker
             if (_selectedMarker != null)
             {
                 UnregisterMarker(_selectedMarker);
@@ -608,7 +696,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // delete VF only if empty
             if (_selectedGroup.Markers.Count == 0)
             {
                 _selectedGroup.Destroy();
@@ -715,14 +802,14 @@ namespace DV_RoadTraffic
         {
             if (!_editingRouteName)
                 return;
-
-            // allow ESC cancel even though DV input is blocked
+   
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 Main.Log("[DVRT] Route rename cancelled.");
 
-                BlockGameplayInput(false);
                 _editingRouteName = false;
+
+                _releaseGameplayInputAfterEscape = true;
 
                 var controller = GetController();
                 if (controller != null)
@@ -731,7 +818,6 @@ namespace DV_RoadTraffic
                 return;
             }
 
-            // Ignore the first frame (contains the Alt+N keypress)
             if (_skipTypingFrame)
             {
                 _skipTypingFrame = false;
@@ -780,7 +866,7 @@ namespace DV_RoadTraffic
         public static void _______________SPAWN_________________()
         {
         }
-    
+
         private static void SpawnVehicleFactory(Vector3 pos)
         {
             DVRT_Manager.MarkUnsavedChanges();
@@ -795,8 +881,6 @@ namespace DV_RoadTraffic
 
             vf.RouteName = $"Route {_factories.Count + 1}";
             vf.TrafficRate = 5;
-
-            vf.CacheNearbyBarriers();
 
             if (vf == null)
             {
@@ -888,7 +972,7 @@ namespace DV_RoadTraffic
             clone.transform.SetParent(null, true);
             clone.transform.localScale = Vector3.one;
             
-            // REMOVE TRAILER HERE
+            // DO NOT SPAWN TRAILERS
             for (int i = clone.transform.childCount - 1; i >= 0; i--)
             {
                 Transform child = clone.transform.GetChild(i);
@@ -898,14 +982,17 @@ namespace DV_RoadTraffic
                     child.gameObject.SetActive(false);
                 }
             }
-            
+
+            Main.Log($"[Collisions] Main.Settings.vehicleLayer = {Main.Settings.vehicleLayer}");
             SetLayerRecursive(clone, Main.Settings.vehicleLayer);
-            Physics.IgnoreLayerCollision(27, 27, true);
+            Main.Log($"[Collisions]Spawn from factory - vehicle layer set to {clone.layer}");
 
             var controller = clone.AddComponent<TrafficVehicleController>();
             controller.Initialize(4f, vf.TTL, vf.RouteName, archetype.name, vf);
 
             DVRT_Manager.ActiveVehicles.Add(controller);
+            vf.ActiveVehicles.Add(controller);
+
             return true;
         }
 
@@ -1077,6 +1164,24 @@ namespace DV_RoadTraffic
             }
 
             return null;
+        }
+
+        public static void RefreshBarriersAfterFastTravel()
+        {
+            Main.Log("[DVRT] Requesting barrier refresh after fast travel.");
+
+            for (int i = 0; i < _factories.Count; i++)
+            {
+                VehicleFactory factory = _factories[i];
+
+                if (factory == null || factory.Root == null)
+                    continue;
+
+                if (!factory.IsPlayerWithinActivationRange())
+                    continue;
+
+                factory.RequestBarrierRefresh();
+            }
         }
 
         public static void _______________MARKER_HELPERS_________________()
@@ -1615,7 +1720,7 @@ namespace DV_RoadTraffic
             foreach (var vf in _factories)
             {
                 if (vf != null)
-                    vf.Destroy();   // remove GO + unsubscribe WOS
+                    vf.Destroy();   
             }
 
             _factories.Clear();
@@ -1699,6 +1804,11 @@ namespace DV_RoadTraffic
             ActiveVehicles.Clear();
 
             Main.Log($"[DVRT] Destroyed {vehicles.Count} active vehicles");
+        }
+
+        public static void ClearMarkerRegistry()
+        {
+            _markerRegistry.Clear();
         }
     }
 }
@@ -2011,7 +2121,6 @@ namespace DV_RoadTraffic
 
             GUILayout.Space(10);
 
-            // Message text
             var textStyle = new GUIStyle(GUI.skin.label);
             textStyle.alignment = TextAnchor.MiddleCenter;
             textStyle.wordWrap = true;
@@ -2174,7 +2283,6 @@ namespace DV_RoadTraffic
 
             yield return new WaitForSeconds(0.1f);
 
-            // --- TELEPORT ---
             PlayerManager.TeleportPlayer(
                 targetPos + Vector3.up * 1.6f,
                 Quaternion.identity,
@@ -2183,7 +2291,6 @@ namespace DV_RoadTraffic
                 false
             );
 
-            // --- WAIT FOR WORLD ---
             yield return WaitForWorldReady();
 
             yield return Fade(0f, 0.5f);

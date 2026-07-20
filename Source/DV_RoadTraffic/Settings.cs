@@ -8,14 +8,19 @@ namespace DV_RoadTraffic
     public class Settings : UnityModManager.ModSettings, IDrawable
     {
         public bool enabled = true;
+#if DEBUG
+        public bool debugLogging = true;
+#else
         public bool debugLogging = false;
+#endif
         public int vehicleLayer = 27;
 
         public KeyBind ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
         public KeyBind ToggleTrafficWarden = new KeyBind(KeyCode.W, false, true);
         
-        public bool ignoreTrainImpact = false;
+        public bool ignoreTrainImpact = true;
         public bool stopIfTrainAhead = true;
+        public bool allowVehicleEscape = true;
 
         public float impactOomph = 1.0f;
 
@@ -45,12 +50,15 @@ namespace DV_RoadTraffic
         public KeyBind RaiseObject = new KeyBind(KeyCode.PageUp);
         public KeyBind LowerObject = new KeyBind(KeyCode.PageDown);
 
+        public bool enableAutoHeadlights = true;
+
         public void ResetToDefaults()
         {
             ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
             ToggleTrafficWarden = new KeyBind(KeyCode.W, false, true);
             ignoreTrainImpact = false;
             stopIfTrainAhead = true;
+            allowVehicleEscape = true;
 
             engineVolume = 1.0f;
             hornVolume = 1.0f;
@@ -105,10 +113,12 @@ namespace DV_RoadTraffic
         
         public static void Draw(Settings settings)
         {
-                      
-            // =========================================================
-
             GUILayout.Label("Game Options", GUI.skin.box);
+            Main.Settings.enableAutoHeadlights = GUILayout.Toggle(
+       Main.Settings.enableAutoHeadlights,
+       "Turn Vehicle Headlights On At Night"
+   );
+            GUILayout.Space(6);
 
             // -------------------------
             // CONTROLS
@@ -135,6 +145,11 @@ namespace DV_RoadTraffic
             Main.Settings.stopIfTrainAhead = GUILayout.Toggle(
                 Main.Settings.stopIfTrainAhead,
                 "Stop if Train Detected Ahead"
+            );
+
+            Main.Settings.allowVehicleEscape = GUILayout.Toggle(
+                Main.Settings.allowVehicleEscape,
+                "Allow Vehicles to Escape DV_LevelCrossings"
             );
 
             GUILayout.Label($"Train Impact Oomph: {Main.Settings.impactOomph:F2}");
@@ -226,7 +241,8 @@ namespace DV_RoadTraffic
 
             DrawKeyBind("Toggle Gun Types", settings.ToggleGunType);
 
-            
+
+#if DEBUG
 
             GUILayout.Space(20);
 
@@ -235,7 +251,7 @@ namespace DV_RoadTraffic
 
             GUILayout.Label("Developer Options", UnityModManager.UI.h2);
 
-            /*
+            
             bool newDebug = GUILayout.Toggle(settings.debugLogging, "Enable Debug Logging");
 
             if (newDebug != settings.debugLogging)
@@ -244,7 +260,7 @@ namespace DV_RoadTraffic
                 Main.Log($"[DVRT] Debug logging {(settings.debugLogging ? "ENABLED" : "DISABLED")}", true);
             }
 
-            */
+            
 
             GUILayout.Label($"Vehicle Layer: {Main.Settings.vehicleLayer}");
 
@@ -259,8 +275,11 @@ namespace DV_RoadTraffic
                 Main.Settings.vehicleLayer = newLayer;
                 DVRT_Manager.ApplyVehicleLayerChange(newLayer);
             }
+            
 
-            GUILayout.EndVertical();            
+            GUILayout.EndVertical();   
+            
+#endif
 
             GUILayout.Space(20);
 
@@ -269,8 +288,6 @@ namespace DV_RoadTraffic
                 settings.ResetToDefaults();
                 Main.Settings.Save(Main.Mod);
             }
-
-
         }
         
         private static void DrawKeyBind(string label, KeyBind bind)

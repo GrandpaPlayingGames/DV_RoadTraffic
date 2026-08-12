@@ -26,6 +26,7 @@ namespace DV_RoadTraffic
 
         public float engineVolume = 1.0f;
         public float hornVolume = 1.0f;
+        public float closedCabSoundDampening = 0.5f;
 
         public KeyBind RouteInteract = new KeyBind(KeyCode.F9);
 
@@ -52,6 +53,8 @@ namespace DV_RoadTraffic
 
         public bool enableAutoHeadlights = true;
 
+        public bool enableTraffic = true;
+
         public void ResetToDefaults()
         {
             ToggleEditMode = new KeyBind(KeyCode.F9, true, true);
@@ -62,6 +65,7 @@ namespace DV_RoadTraffic
 
             engineVolume = 1.0f;
             hornVolume = 1.0f;
+            closedCabSoundDampening = 0.5f;
 
             impactOomph = 1.0f;
 
@@ -87,6 +91,9 @@ namespace DV_RoadTraffic
 
             RaiseObject = new KeyBind(KeyCode.PageUp);
             LowerObject = new KeyBind(KeyCode.PageDown);
+
+            enableAutoHeadlights = true;
+            enableTraffic = true;
         }
 
         public void Draw(UnityModManager.ModEntry modEntry)
@@ -114,10 +121,27 @@ namespace DV_RoadTraffic
         public static void Draw(Settings settings)
         {
             GUILayout.Label("Game Options", GUI.skin.box);
-            Main.Settings.enableAutoHeadlights = GUILayout.Toggle(
-       Main.Settings.enableAutoHeadlights,
-       "Turn Vehicle Headlights On At Night"
-   );
+
+            bool newEnableTraffic = GUILayout.Toggle(
+                settings.enableTraffic,
+                "Enable Road Traffic"
+            );
+
+            if (newEnableTraffic != settings.enableTraffic)
+            {
+                settings.enableTraffic = newEnableTraffic;
+
+                DVRT_Manager.ApplyTrafficEnabled(
+                    settings.enableTraffic);
+            }
+
+            settings.enableAutoHeadlights = GUILayout.Toggle(
+                settings.enableAutoHeadlights,
+                "Turn Vehicle Headlights On At Night"
+            );
+
+            GUILayout.Space(6);
+
             GUILayout.Space(6);
 
             // -------------------------
@@ -184,7 +208,26 @@ namespace DV_RoadTraffic
                 0f,
                 1.5f
             );
-            
+
+            GUILayout.Space(6);
+
+            GUILayout.Label(
+                $"Closed Cab Sound Dampening: " +
+                $"{(Main.Settings.closedCabSoundDampening * 100f):F0}%"
+            );
+
+            Main.Settings.closedCabSoundDampening =
+                GUILayout.HorizontalSlider(
+                    Main.Settings.closedCabSoundDampening,
+                    0f,
+                    1f
+                );
+
+            GUILayout.Label(
+                "Reduces road traffic sounds when inside a cab " +
+                "with all doors and windows closed."
+            );
+
             GUILayout.Space(10);
 
             GUILayout.Label("Main Edit Options", GUI.skin.box);

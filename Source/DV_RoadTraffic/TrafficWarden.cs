@@ -1,8 +1,62 @@
 ﻿using UnityEngine;
 using System.Collections;
+using System;
 
 namespace DV_RoadTraffic
 {
+    public static class TrafficWardenAPI
+    {
+        private static Func<bool> _fireGate;
+        public static bool FireGateRegistered => _fireGate != null;
+
+        public static void IncrementScore()
+        {
+            TrafficWarden.RegisterKill();
+        }
+
+        public static void RegisterFireGate(
+            Func<bool> fireGate)
+        {
+            _fireGate = fireGate;
+
+            Main.Log(
+                "[DVRT] External Traffic Warden fire gate registered.",
+                true);
+        }
+
+        public static void UnregisterFireGate()
+        {
+            _fireGate = null;
+
+            Main.Log(
+                "[DVRT] External Traffic Warden fire gate removed.",
+                true);
+        }
+
+        internal static bool TryAuthorizeFire()
+        {
+            if (_fireGate == null)
+                return true;
+
+            try
+            {
+                return _fireGate();
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    "[DVRT] External fire gate failed: " +
+                    ex.Message +
+                    ". Allowing shot.",
+                    true);
+
+                _fireGate = null;
+
+                return true;
+            }
+        }
+    }
+
     public class TrafficWarden : MonoBehaviour
     {
         public static TrafficWarden Instance;
@@ -56,15 +110,46 @@ namespace DV_RoadTraffic
                 return;
             }
 
+            if (TrafficWardenAPI.FireGateRegistered &&
+                weaponMode != WeaponMode.Projectile)
+            {
+                weaponMode =
+                    WeaponMode.Projectile;
+
+                DVRT_RuntimeUI.Instance?.SetWeaponText(
+                    $"Weapon: {weaponMode}");
+
+                Main.Log(
+                    "[DVRT] Weapon forced to Projectile because external fire gate is active.",
+                    true);
+            }
+
             if (Main.Settings.ToggleGunType.IsPressed())
             {
-                weaponMode = weaponMode == WeaponMode.Projectile
-                    ? WeaponMode.Raygun
-                    : WeaponMode.Projectile;
+                if (TrafficWardenAPI.FireGateRegistered)
+                {
+                    weaponMode = WeaponMode.Projectile;
 
-                DVRT_RuntimeUI.Instance?.SetWeaponText($"Weapon: {weaponMode}");
+                    DVRT_RuntimeUI.Instance?.SetWeaponText(
+                        $"Weapon: {weaponMode}");
 
-                Main.Log($"[DVRT] Weapon mode: {weaponMode}");
+                    Main.Log(
+                        "[DVRT] Raygun unavailable while external fire gate is active.",
+                        true);
+                }
+                else
+                {
+                    weaponMode =
+                        weaponMode == WeaponMode.Projectile
+                            ? WeaponMode.Raygun
+                            : WeaponMode.Projectile;
+
+                    DVRT_RuntimeUI.Instance?.SetWeaponText(
+                        $"Weapon: {weaponMode}");
+
+                    Main.Log(
+                        $"[DVRT] Weapon mode: {weaponMode}");
+                }
             }
 
             HandleToggle();
@@ -115,13 +200,19 @@ namespace DV_RoadTraffic
             if (!Input.GetMouseButtonDown(0))
                 return;
 
-            if (enabledMode && Input.GetMouseButtonDown(0))
+            if (Cursor.visible)
+                return;
+
+            if (weaponMode == WeaponMode.Projectile)
             {
-                if (weaponMode == WeaponMode.Projectile)
-                    FireBullet();
-                else
-                    FireRay();
+                if (!TrafficWardenAPI.TryAuthorizeFire())
+                    return;
+
+                FireBullet();
+                return;
             }
+
+            FireRay();
         }
 
         void FireBullet()
@@ -208,7 +299,7 @@ namespace DV_RoadTraffic
                     Main.Log("[DVRT] Traffic Warden destroyed vehicle");
                 }
             }
-        }
+        }        
     }
 }
 
@@ -227,13 +318,25 @@ namespace DV_RoadTraffic
                 Destroy(gameObject);
         }
 
-        void OnCollisionEnter(Collision collision)
+        private void OnCollisionEnter(Collision collision)
         {
-            var vehicle = collision.collider.GetComponentInParent<TrafficVehicleController>();
+            if (collision == null || collision.collider == null)
+                return;
+
+            Main.Log(
+                "[DVRT] Bullet collided with: " +
+                collision.collider.name,
+                true);
+
+            TrafficVehicleController vehicle =
+                collision.collider
+                    .GetComponentInParent<TrafficVehicleController>();
 
             if (vehicle != null && !vehicle.destroyed)
             {
-                vehicle.DestroyVehicle(Vector3.zero, true);
+                vehicle.DestroyVehicle(
+                    Vector3.zero,
+                    true);
 
                 TrafficWarden.RegisterKill();
             }

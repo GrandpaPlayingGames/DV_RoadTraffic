@@ -103,7 +103,6 @@ namespace DV_RoadTraffic {
             Settings.Save(modEntry);
         }
 
-        
         private static void Update(UnityModManager.ModEntry modEntry, float dt)
         {
             if (!_loaded)
@@ -115,6 +114,7 @@ namespace DV_RoadTraffic {
             CheckGameLoadedOnce();
 
             DVRT_Manager.Update(dt);
+
         }
         
 

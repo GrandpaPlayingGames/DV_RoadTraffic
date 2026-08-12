@@ -130,7 +130,10 @@ namespace DV_RoadTraffic
                 _layerCheckDone = true;
             }
 
-            if (!_globalEditingMode)
+            //if (!_globalEditingMode)
+            if(!_globalEditingMode &&
+                Main.Settings.enableTraffic)
+
             {
                 Transform playerTransform = Camera.main?.transform;
 
@@ -918,6 +921,9 @@ namespace DV_RoadTraffic
 
         public static bool SpawnFromFactory(VehicleFactory vf)
         {
+            if (!Main.Settings.enableTraffic)
+                return false;
+
             if (vf == null || vf.Root == null)
                 return false;
 
@@ -1785,25 +1791,56 @@ namespace DV_RoadTraffic
             }
         }
 
+        public static void ApplyTrafficEnabled(bool enabled)
+        {
+            if (!enabled)
+            {
+                DestroyAllVehicles();
+
+                Main.Log(
+                    "[DVRT] Road traffic disabled. " +
+                    "All active vehicles removed.");
+            }
+            else
+            {
+                _nextFactoryActivationCheckTime = 0f;
+
+                Main.Log(
+                    "[DVRT] Road traffic enabled. " +
+                    "Vehicle factories will resume normally.");
+            }
+        }
+
         public static void DestroyAllVehicles()
         {
-            var vehicles = ActiveVehicles.ToList(); 
+            var vehicles = ActiveVehicles.ToList();
 
-            foreach (var v in vehicles)
+            foreach (var vehicle in vehicles)
             {
-                if (v == null)
+                if (vehicle == null)
                     continue;
 
                 try
                 {
-                    GameObject.Destroy(v.gameObject);
+                    GameObject.Destroy(vehicle.gameObject);
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             ActiveVehicles.Clear();
 
-            Main.Log($"[DVRT] Destroyed {vehicles.Count} active vehicles");
+            for (int i = 0; i < _factories.Count; i++)
+            {
+                VehicleFactory factory = _factories[i];
+
+                if (factory != null)
+                    factory.ActiveVehicles.Clear();
+            }
+
+            Main.Log(
+                $"[DVRT] Destroyed {vehicles.Count} active vehicles");
         }
 
         public static void ClearMarkerRegistry()

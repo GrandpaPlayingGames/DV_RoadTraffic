@@ -2,6 +2,7 @@
 using System.IO;
 using UnityEngine;
 using System.Collections.Generic;
+using DV.Utils;
 
 public class TrafficVehicleAudio : MonoBehaviour
 {
@@ -13,12 +14,17 @@ public class TrafficVehicleAudio : MonoBehaviour
 
     private TrafficVehicleController controller;
 
-    public void Initialize(TrafficVehicleController vehicle, AudioClip engineClip)
+    public void Initialize(
+        TrafficVehicleController vehicle,
+        AudioClip engineClip)
     {
         controller = vehicle;
 
-        engineSource = gameObject.AddComponent<AudioSource>();
-        oneshotSource = gameObject.AddComponent<AudioSource>();
+        engineSource =
+            gameObject.AddComponent<AudioSource>();
+
+        oneshotSource =
+            gameObject.AddComponent<AudioSource>();
 
         engineSource.clip = engineClip;
         engineSource.loop = true;
@@ -28,47 +34,106 @@ public class TrafficVehicleAudio : MonoBehaviour
         engineSource.maxDistance = 30f;
         engineSource.minDistance = 3f;
 
-        if (oneshotSource != null)
-            oneshotSource.volume = 1f; 
+        oneshotSource.spatialBlend = 1f;
+        oneshotSource.dopplerLevel = 1f;
+        oneshotSource.rolloffMode = AudioRolloffMode.Linear;
+        oneshotSource.maxDistance = 30f;
+        oneshotSource.minDistance = 3f;
 
-        if (engineSource != null)
-            engineSource.volume = Main.Settings.engineVolume;
+        UpdateVolumes();
 
         engineSource.Play();
     }
 
-    void Update()
+    private void Update()
     {
-        if (controller == null || engineSource == null)
+        if (controller == null ||
+            engineSource == null)
+        {
             return;
+        }
 
-        float speed = controller.CurrentSpeed;
-        float max = controller.MaxSpeed;
+        float maxSpeed = controller.MaxSpeed;
 
-        if (max <= 0f)
-            return;
+        if (maxSpeed > 0f)
+        {
+            float speed = controller.CurrentSpeed;
 
-        float t = Mathf.Clamp01(speed / max);
+            float normalizedSpeed =
+                Mathf.Clamp01(speed / maxSpeed);
 
-        engineSource.pitch = Mathf.Lerp(basePitch, maxPitch, t);
+            engineSource.pitch =
+                Mathf.Lerp(
+                    basePitch,
+                    maxPitch,
+                    normalizedSpeed);
+        }
+
+        UpdateVolumes();
+    }
+
+    private void UpdateVolumes()
+    {
+        float cabMultiplier =
+            GetClosedCabVolumeMultiplier();
 
         if (engineSource != null)
         {
-            engineSource.volume = Main.Settings.engineVolume;
+            engineSource.volume =
+                Main.Settings.engineVolume *
+                cabMultiplier;
         }
+
+        if (oneshotSource != null)
+        {
+            oneshotSource.volume =
+                cabMultiplier;
+        }
+    }
+
+    private static float GetClosedCabVolumeMultiplier()
+    {
+        AudioManager audioManager =
+            SingletonBehaviour<AudioManager>.Instance;
+
+        bool insideClosedCab =
+            audioManager != null &&
+            audioManager.Internality > 0.5f;
+
+        if (!insideClosedCab)
+            return 1f;
+
+        float dampening =
+            Mathf.Clamp01(
+                Main.Settings.closedCabSoundDampening);
+
+        return 1f - dampening;
     }
 
     public void PlayHorn(AudioClip clip)
     {
-        if (clip == null || oneshotSource == null)
+        if (clip == null ||
+            oneshotSource == null)
+        {
             return;
+        }
 
-        oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
+        oneshotSource.PlayOneShot(
+            clip,
+            Main.Settings.hornVolume);
     }
 
     public void PlayBrake(AudioClip clip)
     {
-        oneshotSource.PlayOneShot(clip, Main.Settings.hornVolume);
+        if (clip == null ||
+            oneshotSource == null)
+        {
+            return;
+        }
+
+        oneshotSource.PlayOneShot(
+            clip,
+            Main.Settings.hornVolume);
     }
 }
 
